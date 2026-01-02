@@ -1,0 +1,238 @@
+{
+    "info": {
+        "_postman_id": "fintech-api-collection",
+        "name": "SendInChat - Fintech API",
+        "description": "Complete testing flow for all 8 fintech endpoints",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "1. Client Authentication",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"clientId\": \"test_client_001\",\n  \"clientSecret\": \"test_secret_001\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/fintech/auth",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "auth"
+                    ]
+                },
+                "description": "Authenticate using client credentials. Save the access_token for subsequent requests."
+            },
+            "response": []
+        },
+        {
+            "name": "2. Create Wallet",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"bvn\": \"12345678901\",\n  \"dateOfBirth\": \"1990-01-15\",\n  \"gender\": 1,\n  \"lastName\": \"Doe\",\n  \"otherNames\": \"John\",\n  \"phoneNo\": \"08012345678\",\n  \"transactionTrackingRef\": \"TRK001\",\n  \"accountName\": \"John Doe\",\n  \"placeOfBirth\": \"Lagos\",\n  \"address\": \"123 Main Street, Lagos\",\n  \"nationalIdentityNo\": \"NIN12345678\",\n  \"nextOfKinPhoneNo\": \"08087654321\",\n  \"nextOfKinName\": \"Jane Doe\",\n  \"email\": \"john.doe@example.com\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/fintech/wallet/create",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "wallet",
+                        "create"
+                    ]
+                },
+                "description": "Create a new wallet. Save the accountNo from the response for subsequent tests."
+            },
+            "response": []
+        },
+        {
+            "name": "3. Credit Wallet",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"accountNo\": \"1000000001\",\n  \"narration\": \"Initial deposit\",\n  \"totalAmount\": 10000.00,\n  \"transactionId\": \"TXN001\",\n  \"merchant\": {\n    \"isFee\": false,\n    \"merchantFeeAccount\": \"\",\n    \"merchantFeeAmount\": \"0\"\n  },\n  \"transactionType\": \"deposit\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/fintech/wallet/credit",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "wallet",
+                        "credit"
+                    ]
+                },
+                "description": "Credit funds to a wallet. Use the accountNo from step 2 or the demo account."
+            },
+            "response": []
+        },
+        {
+            "name": "4. Wallet Enquiry",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"accountNo\": \"1000000001\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/fintech/wallet/enquiry",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "wallet",
+                        "enquiry"
+                    ]
+                },
+                "description": "Check wallet balance and details."
+            },
+            "response": []
+        },
+        {
+            "name": "5. Get Bank List",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/fintech/banks",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "banks"
+                    ]
+                },
+                "description": "Retrieve list of all supported banks for transfers."
+            },
+            "response": []
+        },
+        {
+            "name": "6. Bank Transfer",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"customer\": {\n    \"account\": {\n      \"bank\": \"058\",\n      \"name\": \"Jane Smith\",\n      \"number\": \"0123456789\",\n      \"senderaccountnumber\": \"1000000001\",\n      \"sendername\": \"Demo User\"\n    }\n  },\n  \"narration\": \"Payment for services\",\n  \"order\": {\n    \"amount\": \"5000\",\n    \"country\": \"NG\",\n    \"currency\": \"NGN\",\n    \"description\": \"Service payment\"\n  },\n  \"transaction\": {\n    \"reference\": \"REF123456\",\n    \"sessionId\": \"SESSION001\"\n  },\n  \"merchant\": {\n    \"isFee\": true,\n    \"merchantFeeAccount\": \"9999999999\",\n    \"merchantFeeAmount\": \"50\"\n  },\n  \"code\": \"00\",\n  \"message\": \"Success\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/fintech/transfer/bank",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "transfer",
+                        "bank"
+                    ]
+                },
+                "description": "Transfer funds to another bank. Ensure sender account has sufficient balance."
+            },
+            "response": []
+        },
+        {
+            "name": "7. Debit Wallet",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"accountNo\": \"1000000001\",\n  \"narration\": \"Withdrawal\",\n  \"totalAmount\": 1000.00,\n  \"transactionId\": \"TXN002\",\n  \"merchant\": {\n    \"isFee\": true,\n    \"merchantFeeAccount\": \"9999999999\",\n    \"merchantFeeAmount\": \"10\"\n  },\n  \"transactionType\": \"withdrawal\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/fintech/wallet/debit",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "wallet",
+                        "debit"
+                    ]
+                },
+                "description": "Debit funds from a wallet. Ensure sufficient balance including fees."
+            },
+            "response": []
+        },
+        {
+            "name": "8. Wallet Transactions",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"accountNumber\": \"1000000001\",\n  \"fromDate\": \"2025-01-01\",\n  \"toDate\": \"2025-12-31\",\n  \"numberOfItems\": \"100\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/fintech/wallet/transactions",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "fintech",
+                        "wallet",
+                        "transactions"
+                    ]
+                },
+                "description": "Retrieve transaction history for a wallet within a date range."
+            },
+            "response": []
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000",
+            "type": "string"
+        }
+    ]
+}
