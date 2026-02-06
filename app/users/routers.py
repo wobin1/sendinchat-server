@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import timedelta
 import asyncpg
+import logging
 
 from app.db.database import get_connection
 from app.users.models import User
@@ -9,6 +10,8 @@ from app.users.schemas import UserCreate, UserOut, Token
 from app.users import service as user_service
 from app.core.security import create_access_token, verify_token
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -48,17 +51,26 @@ async def register(
     conn: asyncpg.Connection = Depends(get_connection)
 ):
     """Register a new user."""
+    logger.info(f"Registration attempt for username: {user_data.username}")
     try:
         user = await user_service.create_user(
             conn=conn,
             username=user_data.username,
             password=user_data.password
         )
+        logger.info(f"Registration successful for username: {user_data.username}, user_id: {user.id}")
         return user
     except ValueError as e:
+        logger.warning(f"Registration failed for username: {user_data.username} - {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during registration for username: {user_data.username} - {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during registration"
         )
 
 

@@ -6,8 +6,12 @@ from app.packages.fintech.schemas import (
     CreateWalletRequest, WalletResponse,
     BankTransferRequest, BankTransferResponse,
     WalletOperationRequest, WalletOperationResponse,
+    WalletTransferRequest, WalletTransferResponse,
     WalletEnquiryRequest, WalletEnquiryResponse,
     WalletTransactionsRequest, WalletTransactionsResponse,
+    WalletUpgradeRequest, WalletUpgradeResponse,
+    UpgradeStatusResponse, GetWalletByBVNResponse,
+    InflowWebhookPayload, UpgradeStatusWebhookPayload, WebhookResponse,
     BankListResponse,
     ClientAuthRequest, ClientAuthResponse
 )
@@ -27,7 +31,7 @@ async def create_wallet(request: CreateWalletRequest):
     This endpoint creates a new wallet account with the provided KYC details.
     """
     try:
-        result = fintech_service.create_wallet(
+        result = await fintech_service.create_wallet(
             bvn=request.bvn,
             date_of_birth=request.dateOfBirth,
             gender=request.gender,
@@ -94,27 +98,27 @@ async def bank_transfer(request: BankTransferRequest):
         )
 
 
-# ============= 3. Credit Wallet =============
-@router.post("/wallet/credit", response_model=WalletOperationResponse, status_code=status.HTTP_200_OK)
-async def credit_wallet(request: WalletOperationRequest):
+# ============= 3. Wallet Transfer (P2P) =============
+@router.post("/wallet/transfer", response_model=WalletTransferResponse, status_code=status.HTTP_200_OK)
+async def transfer_wallet(request: WalletTransferRequest):
     """
-    Credit a wallet.
+    Transfer funds between two wallet accounts.
     
-    This endpoint adds funds to a wallet account.
+    This endpoint debits the sender's account and credits the receiver's account.
     """
     try:
-        result = fintech_service.credit_wallet(
-            account_no=request.accountNo,
+        result = await fintech_service.transfer_funds(
+            sender_account_no=request.senderAccountNo,
+            receiver_account_no=request.receiverAccountNo,
+            amount=request.amount,
             narration=request.narration,
-            total_amount=request.totalAmount,
             transaction_id=request.transactionId,
             merchant_fee_account=request.merchant.merchantFeeAccount,
             merchant_fee_amount=request.merchant.merchantFeeAmount,
-            is_fee=request.merchant.isFee,
-            transaction_type=request.transactionType
+            is_fee=request.merchant.isFee
         )
-        return WalletOperationResponse(
-            message="Wallet credited successfully",
+        return WalletTransferResponse(
+            message="Transfer successful",
             **result
         )
     except ValueError as e:
@@ -123,47 +127,16 @@ async def credit_wallet(request: WalletOperationRequest):
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Wallet credit failed: {str(e)}")
+        logger.error(f"Transfer failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Wallet credit failed"
+            detail="Transfer failed"
         )
 
 
-# ============= 4. Debit Wallet =============
-@router.post("/wallet/debit", response_model=WalletOperationResponse, status_code=status.HTTP_200_OK)
-async def debit_wallet(request: WalletOperationRequest):
-    """
-    Debit a wallet.
-    
-    This endpoint deducts funds from a wallet account.
-    """
-    try:
-        result = fintech_service.debit_wallet(
-            account_no=request.accountNo,
-            narration=request.narration,
-            total_amount=request.totalAmount,
-            transaction_id=request.transactionId,
-            merchant_fee_account=request.merchant.merchantFeeAccount,
-            merchant_fee_amount=request.merchant.merchantFeeAmount,
-            is_fee=request.merchant.isFee,
-            transaction_type=request.transactionType
-        )
-        return WalletOperationResponse(
-            message="Wallet debited successfully",
-            **result
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Wallet debit failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Wallet debit failed"
-        )
+# Note: Credit and Debit endpoints removed - use transfer endpoint instead
+# These operations are now internal only, called by the transfer function
+
 
 
 # ============= 5. Wallet Enquiry =============
@@ -265,3 +238,163 @@ async def authenticate_client(request: ClientAuthRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Client authentication failed"
         )
+
+
+# ============= Account Management =============
+
+# ============= 9. Wallet Upgrade =============
+@router.post("/wallet/upgrade", response_model=WalletUpgradeResponse, status_code=status.HTTP_200_OK)
+async def upgrade_wallet(request: WalletUpgradeRequest):
+    """
+    Upgrade wallet account tier.
+    
+    This endpoint submits a request to upgrade the wallet from Tier 1 to Tier 2 or Tier 3.
+    Requires additional KYC documents.
+    """
+    try:
+        result = await fintech_service.upgrade_wallet(
+            account_number=request.accountNumber,
+            bvn=request.bvn,
+            nin=request.nin,
+            account_name=request.accountName,
+            phone_number=request.phoneNumber,
+            tier=request.tier,
+            email=request.email,
+            user_photo=request.userPhoto,
+            id_type=request.idType,
+            id_number=request.idNumber,
+            id_issue_date=request.idIssueDate,
+            id_expiry_date=request.idExpiryDate,
+            id_card_front=request.idCardFront,
+            id_card_back=request.idCardBack,
+            house_number=request.houseNumber,
+            street_name=request.streetName,
+            state=request.state,
+            city=request.city,
+            local_government=request.localGovernment,
+            pep=request.pep,
+            customer_signature=request.customerSignature,
+            utility_bill=request.utilityBill,
+            nearest_landmark=request.nearestLandmark,
+            place_of_birth=request.placeOfBirth,
+            proof_of_address_verification=request.proofOfAddressVerification
+        )
+        return WalletUpgradeResponse(**result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Wallet upgrade failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Wallet upgrade failed"
+        )
+
+
+# ============= 10. Upgrade Status =============
+@router.get("/wallet/upgrade-status/{accountNo}", response_model=UpgradeStatusResponse, status_code=status.HTTP_200_OK)
+async def get_upgrade_status(accountNo: str):
+    """
+    Get wallet upgrade status.
+    
+    This endpoint checks the status of a wallet upgrade request.
+    """
+    try:
+        result = await fintech_service.get_upgrade_status(accountNo)
+        return UpgradeStatusResponse(
+            accountNumber=accountNo,
+            **result
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Upgrade status query failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Upgrade status query failed"
+        )
+
+
+# ============= 11. Get Wallet by BVN =============
+@router.get("/wallet/by-bvn/{bvn}", response_model=GetWalletByBVNResponse, status_code=status.HTTP_200_OK)
+async def get_wallet_by_bvn(bvn: str):
+    """
+    Get wallet information by BVN.
+    
+    This endpoint retrieves wallet details using the Bank Verification Number.
+    """
+    try:
+        result = await fintech_service.get_wallet_by_bvn(bvn)
+        return GetWalletByBVNResponse(**result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Get wallet by BVN failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Get wallet by BVN failed"
+        )
+
+
+# ============= Webhooks =============
+
+# ============= 12. Inflow Notification Webhook =============
+@router.post("/webhooks/inflow", response_model=WebhookResponse, status_code=status.HTTP_200_OK)
+async def inflow_webhook(payload: InflowWebhookPayload):
+    """
+    Webhook endpoint for inflow notifications from third-party API.
+    
+    This endpoint receives notifications when funds are credited to a wallet account.
+    The third-party API calls this endpoint to notify about incoming transfers.
+    """
+    try:
+        result = fintech_service.handle_inflow_notification(payload.dict())
+        return WebhookResponse(**result)
+    except ValueError as e:
+        logger.error(f"Inflow webhook processing failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Inflow webhook error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Webhook processing failed"
+        )
+
+
+# ============= 13. Upgrade Status Notification Webhook =============
+@router.post("/webhooks/upgrade-status", response_model=WebhookResponse, status_code=status.HTTP_200_OK)
+async def upgrade_status_webhook(payload: UpgradeStatusWebhookPayload):
+    """
+    Webhook endpoint for upgrade status notifications from third-party API.
+    
+    This endpoint receives notifications when a wallet upgrade request is approved or declined.
+    The third-party API calls this endpoint to notify about upgrade status changes.
+    """
+    try:
+        result = fintech_service.handle_upgrade_status_notification(payload.dict())
+        return WebhookResponse(**result)
+    except ValueError as e:
+        logger.error(f"Upgrade status webhook processing failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Upgrade status webhook error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Webhook processing failed"
+        )
+
+

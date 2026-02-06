@@ -1,20 +1,31 @@
-# FastAPI and server
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-multipart==0.0.6
-
-# Database - Raw SQL with asyncpg
+annotated-types==0.7.0
+anyio==4.12.1
 asyncpg==0.29.0
-
-# Authentication and security
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
 bcrypt==4.1.2
-
-# Configuration
+click==8.3.1
+cryptography==46.0.3
+dnspython==2.8.0
+ecdsa==0.19.1
+email-validator==2.3.0
+fastapi==0.109.0
+h11==0.16.0
+httptools==0.7.1
+idna==3.11
+passlib==1.7.4
+pyasn1==0.6.1
 pydantic==2.5.3
 pydantic-settings==2.1.0
+pydantic_core==2.14.6
 python-dotenv==1.0.0
-
-# WebSocket support
+python-jose==3.3.0
+python-multipart==0.0.6
+PyYAML==6.0.3
+rsa==4.9.1
+six==1.17.0
+starlette==0.35.1
+typing_extensions==4.15.0
+uvicorn==0.27.0
+uvloop==0.22.1
+watchfiles==1.1.1
 websockets==12.0
+httpx==0.27.0

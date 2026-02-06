@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
+    # Third-Party Wallet API
+    WALLET_API_BASE_URL: str = "http://102.216.128.75:9090/waas/api/v1"
+    WALLET_API_USERNAME: str = ""
+    WALLET_API_PASSWORD: str = ""
+    WALLET_API_CLIENT_ID: str = ""
+    WALLET_API_CLIENT_SECRET: str = ""
+    WALLET_API_TIMEOUT: int = 30
+    
     class Config:
         env_file = str(ENV_FILE)
         env_file_encoding = 'utf-8'

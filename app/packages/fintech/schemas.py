@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, EmailStr
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -67,7 +67,7 @@ class TransactionDetails(BaseModel):
 
 class Merchant(BaseModel):
     """Merchant fee details."""
-    isFee: bool
+    isFee: str  # Changed to str to match third-party API ("true" or "false")
     merchantFeeAccount: str
     merchantFeeAmount: str
 
@@ -93,9 +93,32 @@ class BankTransferResponse(BaseModel):
     recipientBank: str
 
 
-# ============= Credit/Debit Wallet =============
+# ============= Wallet Transfer (P2P) =============
+class WalletTransferRequest(BaseModel):
+    """Schema for wallet-to-wallet transfer request."""
+    senderAccountNo: str = Field(..., min_length=10, max_length=10, description="Sender's wallet account number")
+    receiverAccountNo: str = Field(..., min_length=10, max_length=10, description="Receiver's wallet account number")
+    amount: float = Field(..., gt=0, description="Transfer amount")
+    narration: str = Field(..., description="Transfer description")
+    transactionId: str = Field(..., description="Unique transaction reference")
+    merchant: Merchant
+
+
+class WalletTransferResponse(BaseModel):
+    """Schema for wallet transfer response."""
+    status: str = "success"
+    message: str = "Transfer successful"
+    transactionId: str
+    senderAccountNo: str
+    receiverAccountNo: str
+    amount: float
+    senderNewBalance: float
+    receiverNewBalance: float
+
+
+# ============= Credit/Debit Wallet (Internal Use Only) =============
 class WalletOperationRequest(BaseModel):
-    """Schema for wallet credit/debit request."""
+    """Schema for wallet credit/debit request (internal use only)."""
     accountNo: str = Field(..., min_length=10, max_length=10)
     narration: str
     totalAmount: float = Field(..., gt=0)
@@ -105,7 +128,7 @@ class WalletOperationRequest(BaseModel):
 
 
 class WalletOperationResponse(BaseModel):
-    """Schema for wallet operation response."""
+    """Schema for wallet operation response (internal use only)."""
     status: str = "success"
     message: str
     transactionId: str
@@ -169,6 +192,94 @@ class BankListResponse(BaseModel):
     """Schema for bank list response."""
     banks: List[BankInfo]
     count: int
+
+
+# ============= Account Upgrade =============
+class WalletUpgradeRequest(BaseModel):
+    """Schema for wallet account upgrade request."""
+    accountNumber: str = Field(..., min_length=10, max_length=10, description="Wallet account number")
+    bvn: str = Field(..., min_length=11, max_length=11, description="Bank Verification Number")
+    nin: str = Field(..., min_length=11, max_length=11, description="National Identification Number")
+    accountName: str
+    phoneNumber: str = Field(..., pattern=r"^0\d{10}$", description="Phone number (11 digits)")
+    tier: int = Field(..., ge=2, le=3, description="New tier (2 or 3)")
+    email: str = Field(..., pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+    userPhoto: str = Field(..., description="Base64 encoded customer photo")
+    idType: int = Field(..., ge=1, le=4, description="1=NIN, 2=Driver's License, 3=Voter's Card, 4=Int'l Passport")
+    idNumber: str
+    idIssueDate: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$", description="Format: yyyy-MM-dd")
+    idExpiryDate: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Format: yyyy-MM-dd")
+    idCardFront: str = Field(..., description="Base64 encoded ID card front image")
+    idCardBack: Optional[str] = Field(None, description="Base64 encoded ID card back image")
+    houseNumber: str
+    streetName: str
+    state: str
+    city: str
+    localGovernment: str
+    pep: str = Field(..., pattern=r"^(YES|NO)$", description="Politically Exposed Person")
+    customerSignature: str = Field(..., description="Base64 encoded signature")
+    utilityBill: str = Field(..., description="Base64 encoded utility bill")
+    nearestLandmark: str
+    placeOfBirth: Optional[str] = None
+    proofOfAddressVerification: Optional[str] = Field(None, description="Base64 encoded proof of address")
+
+
+class WalletUpgradeResponse(BaseModel):
+    """Schema for wallet upgrade response."""
+    message: str
+    status: str
+    data: Optional[Dict[str, Any]] = None
+
+
+# ============= Upgrade Status =============
+class UpgradeStatusResponse(BaseModel):
+    """Schema for upgrade status response."""
+    message: str
+    status: str
+    accountNumber: str
+    upgradeStatus: Optional[str] = None  # Approved, Declined, Pending
+    tier: Optional[int] = None
+    data: Optional[Dict[str, Any]] = None
+
+
+# ============= Get Wallet by BVN =============
+class GetWalletByBVNResponse(BaseModel):
+    """Schema for get wallet by BVN response."""
+    message: str
+    status: str
+    data: Optional[Dict[str, Any]] = None
+
+
+# ============= Webhooks =============
+class InflowWebhookPayload(BaseModel):
+    """Schema for inflow notification webhook from third-party API."""
+    accountNumber: str
+    amount: float
+    senderAccountNumber: Optional[str] = None
+    senderName: Optional[str] = None
+    narration: Optional[str] = None
+    transactionReference: str
+    transactionDate: str
+    sessionId: Optional[str] = None
+    responseCode: Optional[str] = None
+    responseMessage: Optional[str] = None
+
+
+class UpgradeStatusWebhookPayload(BaseModel):
+    """Schema for upgrade status notification webhook from third-party API."""
+    accountNumber: str
+    upgradeStatus: str  # Approved, Declined, Pending
+    tier: int
+    reason: Optional[str] = None
+    approvalDate: Optional[str] = None
+    responseCode: Optional[str] = None
+    responseMessage: Optional[str] = None
+
+
+class WebhookResponse(BaseModel):
+    """Standard webhook response."""
+    status: str = "received"
+    message: str = "Webhook processed successfully"
 
 
 # ============= Client Authentication =============
