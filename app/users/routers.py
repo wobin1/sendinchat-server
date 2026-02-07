@@ -135,7 +135,7 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     }
 
 
-@router.get("/search", response_model=UserResponse)
+@router.get("/search")
 async def search_users(
     q: str,
     limit: int = 20,
@@ -158,8 +158,19 @@ async def search_users(
     # Filter out current user from results
     users = [u for u in users if u.id != current_user.id]
     
+    # Convert User objects to dictionaries
+    users_data = [
+        {
+            "id": u.id,
+            "username": u.username,
+            "created_at": u.created_at.isoformat(),
+            "is_active": u.is_active
+        }
+        for u in users
+    ]
+    
     return {
         "status": "success",
-        "message": f"Found {len(users)} users",
-        "data": users
+        "message": f"Found {len(users_data)} users",
+        "data": users_data
     }
