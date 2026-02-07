@@ -326,3 +326,80 @@ class TransactionOut(BaseModel):
             Decimal: lambda v: float(v)
         }
 
+
+# ============= Standard API Response Wrappers =============
+class StandardWalletResponse(BaseModel):
+    """Standard response wrapper for wallet operations."""
+    status: str
+    message: str
+    data: Optional[WalletResponse] = None
+
+
+class StandardBankTransferResponse(BaseModel):
+    """Standard response wrapper for bank transfer operations."""
+    status: str
+    message: str
+    data: Optional[BankTransferResponse] = None
+
+
+class StandardWalletTransferResponse(BaseModel):
+    """Standard response wrapper for wallet transfer operations."""
+    status: str
+    message: str
+    data: Optional[WalletTransferResponse] = None
+
+
+class StandardWalletEnquiryResponse(BaseModel):
+    """Standard response wrapper for wallet enquiry operations."""
+    status: str
+    message: str
+    data: Optional[WalletEnquiryResponse] = None
+
+
+class StandardWalletTransactionsResponse(BaseModel):
+    """Standard response wrapper for wallet transactions operations."""
+    status: str
+    message: str
+    data: Optional[WalletTransactionsResponse] = None
+
+
+class StandardBankListResponse(BaseModel):
+    """Standard response wrapper for bank list operations."""
+    status: str
+    message: str
+    data: Optional[BankListResponse] = None
+
+
+class StandardClientAuthResponse(BaseModel):
+    """Standard response wrapper for client auth operations."""
+    status: str
+    message: str
+    data: Optional[ClientAuthResponse] = None
+
+
+class StandardWalletUpgradeResponse(BaseModel):
+    """Standard response wrapper for wallet upgrade operations."""
+    status: str
+    message: str
+    data: Optional[WalletUpgradeResponse] = None
+
+
+class StandardUpgradeStatusResponse(BaseModel):
+    """Standard response wrapper for upgrade status operations."""
+    status: str
+    message: str
+    data: Optional[UpgradeStatusResponse] = None
+
+
+class StandardGetWalletByBVNResponse(BaseModel):
+    """Standard response wrapper for get wallet by BVN operations."""
+    status: str
+    message: str
+    data: Optional[GetWalletByBVNResponse] = None
+
+
+class StandardWebhookResponse(BaseModel):
+    """Standard response wrapper for webhook operations."""
+    status: str
+    message: str
+    data: Optional[WebhookResponse] = None

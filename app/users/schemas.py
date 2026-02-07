@@ -27,3 +27,17 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     """Schema for token payload data."""
     username: Optional[str] = None
+
+
+class UserResponse(BaseModel):
+    """Standard response for user operations."""
+    status: str
+    message: str
+    data: Optional[UserOut] = None
+
+
+class TokenResponse(BaseModel):
+    """Standard response for token operations."""
+    status: str
+    message: str
+    data: Optional[Token] = None

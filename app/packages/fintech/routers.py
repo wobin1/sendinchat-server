@@ -13,7 +13,13 @@ from app.packages.fintech.schemas import (
     UpgradeStatusResponse, GetWalletByBVNResponse,
     InflowWebhookPayload, UpgradeStatusWebhookPayload, WebhookResponse,
     BankListResponse,
-    ClientAuthRequest, ClientAuthResponse
+    ClientAuthRequest, ClientAuthResponse,
+    StandardWalletResponse, StandardBankTransferResponse,
+    StandardWalletTransferResponse, StandardWalletEnquiryResponse,
+    StandardWalletTransactionsResponse, StandardBankListResponse,
+    StandardClientAuthResponse, StandardWalletUpgradeResponse,
+    StandardUpgradeStatusResponse, StandardGetWalletByBVNResponse,
+    StandardWebhookResponse
 )
 from app.packages.fintech import service as fintech_service
 
@@ -23,7 +29,7 @@ router = APIRouter(prefix="/fintech", tags=["fintech"])
 
 
 # ============= 1. Create Wallet =============
-@router.post("/wallet/create", response_model=WalletResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/wallet/create", response_model=StandardWalletResponse, status_code=status.HTTP_201_CREATED)
 async def create_wallet(request: CreateWalletRequest):
     """
     Create a new wallet.
@@ -47,22 +53,26 @@ async def create_wallet(request: CreateWalletRequest):
             next_of_kin_name=request.nextOfKinName,
             email=request.email
         )
-        return WalletResponse(**result)
+        return {
+            "status": "success",
+            "message": "Wallet created successfully",
+            "data": WalletResponse(**result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Wallet creation failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Wallet creation failed"
+            detail={"status": "error", "message": "Wallet creation failed", "data": None}
         )
 
 
 # ============= 2. Bank Transfer =============
-@router.post("/transfer/bank", response_model=BankTransferResponse, status_code=status.HTTP_200_OK)
+@router.post("/transfer/bank", response_model=StandardBankTransferResponse, status_code=status.HTTP_200_OK)
 async def bank_transfer(request: BankTransferRequest):
     """
     Transfer funds to another bank.
@@ -84,22 +94,26 @@ async def bank_transfer(request: BankTransferRequest):
             merchant_fee_amount=request.merchant.merchantFeeAmount,
             is_fee=request.merchant.isFee
         )
-        return BankTransferResponse(**result)
+        return {
+            "status": "success",
+            "message": "Bank transfer successful",
+            "data": BankTransferResponse(**result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Bank transfer failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Bank transfer failed"
+            detail={"status": "error", "message": "Bank transfer failed", "data": None}
         )
 
 
 # ============= 3. Wallet Transfer (P2P) =============
-@router.post("/wallet/transfer", response_model=WalletTransferResponse, status_code=status.HTTP_200_OK)
+@router.post("/wallet/transfer", response_model=StandardWalletTransferResponse, status_code=status.HTTP_200_OK)
 async def transfer_wallet(request: WalletTransferRequest):
     """
     Transfer funds between two wallet accounts.
@@ -117,20 +131,21 @@ async def transfer_wallet(request: WalletTransferRequest):
             merchant_fee_amount=request.merchant.merchantFeeAmount,
             is_fee=request.merchant.isFee
         )
-        return WalletTransferResponse(
-            message="Transfer successful",
-            **result
-        )
+        return {
+            "status": "success",
+            "message": "Transfer successful",
+            "data": WalletTransferResponse(message="Transfer successful", **result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Transfer failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Transfer failed"
+            detail={"status": "error", "message": "Transfer failed", "data": None}
         )
 
 
@@ -140,7 +155,7 @@ async def transfer_wallet(request: WalletTransferRequest):
 
 
 # ============= 5. Wallet Enquiry =============
-@router.post("/wallet/enquiry", response_model=WalletEnquiryResponse, status_code=status.HTTP_200_OK)
+@router.post("/wallet/enquiry", response_model=StandardWalletEnquiryResponse, status_code=status.HTTP_200_OK)
 async def wallet_enquiry(request: WalletEnquiryRequest):
     """
     Get wallet details and balance.
@@ -151,22 +166,26 @@ async def wallet_enquiry(request: WalletEnquiryRequest):
         result = fintech_service.get_wallet_enquiry(
             account_no=request.accountNo
         )
-        return WalletEnquiryResponse(**result)
+        return {
+            "status": "success",
+            "message": "Wallet enquiry successful",
+            "data": WalletEnquiryResponse(**result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Wallet enquiry failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Wallet enquiry failed"
+            detail={"status": "error", "message": "Wallet enquiry failed", "data": None}
         )
 
 
 # ============= 6. Wallet Transactions =============
-@router.post("/wallet/transactions", response_model=WalletTransactionsResponse, status_code=status.HTTP_200_OK)
+@router.post("/wallet/transactions", response_model=StandardWalletTransactionsResponse, status_code=status.HTTP_200_OK)
 async def wallet_transactions(request: WalletTransactionsRequest):
     """
     Get wallet transaction history.
@@ -180,22 +199,26 @@ async def wallet_transactions(request: WalletTransactionsRequest):
             to_date=request.toDate,
             number_of_items=request.numberOfItems
         )
-        return WalletTransactionsResponse(**result)
+        return {
+            "status": "success",
+            "message": "Wallet transactions retrieved successfully",
+            "data": WalletTransactionsResponse(**result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Wallet transactions query failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Wallet transactions query failed"
+            detail={"status": "error", "message": "Wallet transactions query failed", "data": None}
         )
 
 
 # ============= 7. Get Bank List =============
-@router.get("/banks", response_model=BankListResponse, status_code=status.HTTP_200_OK)
+@router.get("/banks", response_model=StandardBankListResponse, status_code=status.HTTP_200_OK)
 async def get_banks():
     """
     Get list of supported banks.
@@ -204,17 +227,21 @@ async def get_banks():
     """
     try:
         result = fintech_service.get_bank_list()
-        return BankListResponse(**result)
+        return {
+            "status": "success",
+            "message": "Bank list retrieved successfully",
+            "data": BankListResponse(**result)
+        }
     except Exception as e:
         logger.error(f"Bank list retrieval failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Bank list retrieval failed"
+            detail={"status": "error", "message": "Bank list retrieval failed", "data": None}
         )
 
 
 # ============= 8. Client Authentication =============
-@router.post("/auth", response_model=ClientAuthResponse, status_code=status.HTTP_200_OK)
+@router.post("/auth", response_model=StandardClientAuthResponse, status_code=status.HTTP_200_OK)
 async def authenticate_client(request: ClientAuthRequest):
     """
     Authenticate a client using credentials.
@@ -226,24 +253,28 @@ async def authenticate_client(request: ClientAuthRequest):
             client_id=request.clientId,
             client_secret=request.clientSecret
         )
-        return ClientAuthResponse(**result)
+        return {
+            "status": "success",
+            "message": "Client authenticated successfully",
+            "data": ClientAuthResponse(**result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Client authentication failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Client authentication failed"
+            detail={"status": "error", "message": "Client authentication failed", "data": None}
         )
 
 
 # ============= Account Management =============
 
 # ============= 9. Wallet Upgrade =============
-@router.post("/wallet/upgrade", response_model=WalletUpgradeResponse, status_code=status.HTTP_200_OK)
+@router.post("/wallet/upgrade", response_model=StandardWalletUpgradeResponse, status_code=status.HTTP_200_OK)
 async def upgrade_wallet(request: WalletUpgradeRequest):
     """
     Upgrade wallet account tier.
@@ -279,22 +310,26 @@ async def upgrade_wallet(request: WalletUpgradeRequest):
             place_of_birth=request.placeOfBirth,
             proof_of_address_verification=request.proofOfAddressVerification
         )
-        return WalletUpgradeResponse(**result)
+        return {
+            "status": "success",
+            "message": "Wallet upgrade request submitted successfully",
+            "data": WalletUpgradeResponse(**result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Wallet upgrade failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Wallet upgrade failed"
+            detail={"status": "error", "message": "Wallet upgrade failed", "data": None}
         )
 
 
 # ============= 10. Upgrade Status =============
-@router.get("/wallet/upgrade-status/{accountNo}", response_model=UpgradeStatusResponse, status_code=status.HTTP_200_OK)
+@router.get("/wallet/upgrade-status/{accountNo}", response_model=StandardUpgradeStatusResponse, status_code=status.HTTP_200_OK)
 async def get_upgrade_status(accountNo: str):
     """
     Get wallet upgrade status.
@@ -303,25 +338,26 @@ async def get_upgrade_status(accountNo: str):
     """
     try:
         result = await fintech_service.get_upgrade_status(accountNo)
-        return UpgradeStatusResponse(
-            accountNumber=accountNo,
-            **result
-        )
+        return {
+            "status": "success",
+            "message": "Upgrade status retrieved successfully",
+            "data": UpgradeStatusResponse(accountNumber=accountNo, **result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Upgrade status query failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Upgrade status query failed"
+            detail={"status": "error", "message": "Upgrade status query failed", "data": None}
         )
 
 
 # ============= 11. Get Wallet by BVN =============
-@router.get("/wallet/by-bvn/{bvn}", response_model=GetWalletByBVNResponse, status_code=status.HTTP_200_OK)
+@router.get("/wallet/by-bvn/{bvn}", response_model=StandardGetWalletByBVNResponse, status_code=status.HTTP_200_OK)
 async def get_wallet_by_bvn(bvn: str):
     """
     Get wallet information by BVN.
@@ -330,24 +366,28 @@ async def get_wallet_by_bvn(bvn: str):
     """
     try:
         result = await fintech_service.get_wallet_by_bvn(bvn)
-        return GetWalletByBVNResponse(**result)
+        return {
+            "status": "success",
+            "message": "Wallet retrieved successfully",
+            "data": GetWalletByBVNResponse(**result)
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Get wallet by BVN failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Get wallet by BVN failed"
+            detail={"status": "error", "message": "Get wallet by BVN failed", "data": None}
         )
 
 
 # ============= Webhooks =============
 
 # ============= 12. Inflow Notification Webhook =============
-@router.post("/webhooks/inflow", response_model=WebhookResponse, status_code=status.HTTP_200_OK)
+@router.post("/webhooks/inflow", response_model=StandardWebhookResponse, status_code=status.HTTP_200_OK)
 async def inflow_webhook(payload: InflowWebhookPayload):
     """
     Webhook endpoint for inflow notifications from third-party API.
@@ -357,23 +397,27 @@ async def inflow_webhook(payload: InflowWebhookPayload):
     """
     try:
         result = fintech_service.handle_inflow_notification(payload.dict())
-        return WebhookResponse(**result)
+        return {
+            "status": "success",
+            "message": "Webhook processed successfully",
+            "data": WebhookResponse(**result)
+        }
     except ValueError as e:
         logger.error(f"Inflow webhook processing failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Inflow webhook error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Webhook processing failed"
+            detail={"status": "error", "message": "Webhook processing failed", "data": None}
         )
 
 
 # ============= 13. Upgrade Status Notification Webhook =============
-@router.post("/webhooks/upgrade-status", response_model=WebhookResponse, status_code=status.HTTP_200_OK)
+@router.post("/webhooks/upgrade-status", response_model=StandardWebhookResponse, status_code=status.HTTP_200_OK)
 async def upgrade_status_webhook(payload: UpgradeStatusWebhookPayload):
     """
     Webhook endpoint for upgrade status notifications from third-party API.
@@ -383,18 +427,22 @@ async def upgrade_status_webhook(payload: UpgradeStatusWebhookPayload):
     """
     try:
         result = fintech_service.handle_upgrade_status_notification(payload.dict())
-        return WebhookResponse(**result)
+        return {
+            "status": "success",
+            "message": "Webhook processed successfully",
+            "data": WebhookResponse(**result)
+        }
     except ValueError as e:
         logger.error(f"Upgrade status webhook processing failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Upgrade status webhook error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Webhook processing failed"
+            detail={"status": "error", "message": "Webhook processing failed", "data": None}
         )
 
 

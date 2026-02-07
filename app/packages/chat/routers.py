@@ -8,7 +8,11 @@ from app.db.database import get_connection
 from app.users.routers import get_current_user
 from app.users.models import User
 from app.users import service as user_service
-from app.packages.chat.schemas import CreateChatRequest, ChatOut, SendMessageRequest, MessageOut
+from app.packages.chat.schemas import (
+    CreateChatRequest, ChatOut, SendMessageRequest, MessageOut,
+    StandardMessageResponse, StandardMessagesResponse,
+    StandardChatResponse, StandardChatsResponse, StandardMemberResponse
+)
 from app.packages.chat import service as chat_service
 from app.core.security import verify_token
 
@@ -124,7 +128,7 @@ async def websocket_endpoint(
         logger.info(f"WebSocket connection closed for user {user.username} in chat {chat_id}")
 
 
-@router.post("/send_message")
+@router.post("/send_message", response_model=StandardMessageResponse)
 async def send_message(
     chat_id: int,
     message: str,
@@ -148,10 +152,14 @@ async def send_message(
     # Add username to response
     result["sender_username"] = current_user.username
     
-    return result
+    return {
+        "status": "success",
+        "message": "Message sent successfully",
+        "data": result
+    }
 
 
-@router.get("/messages/{chat_id}")
+@router.get("/messages/{chat_id}", response_model=StandardMessagesResponse)
 async def get_messages(
     chat_id: int,
     current_user: User = Depends(get_current_user),
@@ -175,7 +183,7 @@ async def get_messages(
     if not has_access:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this chat"
+            detail={"status": "error", "message": "You don't have access to this chat", "data": None}
         )
     
     messages = await chat_service.get_chat_messages(
@@ -185,10 +193,14 @@ async def get_messages(
         offset=offset
     )
     
-    return {"chat_id": chat_id, "messages": messages}
+    return {
+        "status": "success",
+        "message": "Messages retrieved successfully",
+        "data": {"chat_id": chat_id, "messages": messages}
+    }
 
 
-@router.post("/start_direct_chat")
+@router.post("/start_direct_chat", response_model=StandardChatResponse)
 async def start_direct_chat(
     other_user_id: int,
     current_user: User = Depends(get_current_user),
@@ -200,7 +212,7 @@ async def start_direct_chat(
     if other_user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot create chat with yourself"
+            detail={"status": "error", "message": "Cannot create chat with yourself", "data": None}
         )
     
     # Verify other user exists
@@ -208,17 +220,21 @@ async def start_direct_chat(
     if not other_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            detail={"status": "error", "message": "User not found", "data": None}
         )
     
     chat = await chat_service.create_or_get_direct_chat(
         conn, current_user.id, other_user_id
     )
     
-    return chat
+    return {
+        "status": "success",
+        "message": "Direct chat created/retrieved successfully",
+        "data": chat
+    }
 
 
-@router.get("/my_chats")
+@router.get("/my_chats", response_model=StandardChatsResponse)
 async def get_my_chats(
     chat_type: str = Query(None, regex="^(direct|group)$"),
     current_user: User = Depends(get_current_user),
@@ -233,10 +249,14 @@ async def get_my_chats(
     if chat_type:
         chats = [c for c in chats if c['chat_type'] == chat_type]
     
-    return {"chats": chats}
+    return {
+        "status": "success",
+        "message": "Chats retrieved successfully",
+        "data": {"chats": chats}
+    }
 
 
-@router.post("/create_room")
+@router.post("/create_room", response_model=StandardChatResponse)
 async def create_room(
     name: str = None,
     current_user: User = Depends(get_current_user),
@@ -251,10 +271,14 @@ async def create_room(
         name=name
     )
     
-    return result
+    return {
+        "status": "success",
+        "message": "Chat room created successfully",
+        "data": result
+    }
 
 
-@router.post("/add_member")
+@router.post("/add_member", response_model=StandardMemberResponse)
 async def add_member(
     chat_id: int,
     user_id: int,
@@ -272,19 +296,19 @@ async def add_member(
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat not found"
+            detail={"status": "error", "message": "Chat not found", "data": None}
         )
     
     if chat["creator_id"] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the chat creator can add members"
+            detail={"status": "error", "message": "Only the chat creator can add members", "data": None}
         )
     
     if chat["chat_type"] != "group":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot add members to direct chats"
+            detail={"status": "error", "message": "Cannot add members to direct chats", "data": None}
         )
     
     success = await chat_service.add_chat_member(conn, chat_id, user_id)
@@ -292,7 +316,11 @@ async def add_member(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is already a member"
+            detail={"status": "error", "message": "User is already a member", "data": None}
         )
     
-    return {"status": "success", "chat_id": chat_id, "user_id": user_id}
+    return {
+        "status": "success",
+        "message": "Member added successfully",
+        "data": {"chat_id": chat_id, "user_id": user_id}
+    }
