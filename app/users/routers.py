@@ -133,3 +133,33 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
         "message": "User retrieved successfully",
         "data": current_user
     }
+
+
+@router.get("/search", response_model=UserResponse)
+async def search_users(
+    q: str,
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """Search for users by username."""
+    if not q or len(q) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": "Search query must be at least 2 characters",
+                "data": None
+            }
+        )
+    
+    users = await user_service.search_users(conn, q, limit)
+    
+    # Filter out current user from results
+    users = [u for u in users if u.id != current_user.id]
+    
+    return {
+        "status": "success",
+        "message": f"Found {len(users)} users",
+        "data": users
+    }

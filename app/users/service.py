@@ -2,7 +2,7 @@
 User service layer - handles all user-related business logic.
 """
 import asyncpg
-from typing import Optional
+from typing import Optional, List
 import logging
 
 from app.users.models import User
@@ -53,6 +53,34 @@ async def get_user_by_id(conn: asyncpg.Connection, user_id: int) -> Optional[Use
         return None
     
     return User.from_record(record)
+
+
+async def search_users(conn: asyncpg.Connection, query: str, limit: int = 20) -> List[User]:
+    """
+    Search for users by username.
+    
+    Args:
+        conn: Database connection
+        query: Search query (username)
+        limit: Maximum number of results to return
+        
+    Returns:
+        List of User objects matching the search query
+    """
+    # Search for users where username contains the query (case-insensitive)
+    records = await conn.fetch(
+        """
+        SELECT id, username, hashed_password, is_active, created_at 
+        FROM users 
+        WHERE username ILIKE $1 AND is_active = TRUE
+        ORDER BY username
+        LIMIT $2
+        """,
+        f"%{query}%",
+        limit
+    )
+    
+    return [User.from_record(record) for record in records]
 
 
 async def create_user(conn: asyncpg.Connection, username: str, password: str) -> User:
