@@ -23,7 +23,7 @@ async def get_user_by_username(conn: asyncpg.Connection, username: str) -> Optio
         User object if found, None otherwise
     """
     record = await conn.fetchrow(
-        "SELECT id, username, hashed_password, is_active, created_at FROM users WHERE username = $1",
+        "SELECT id, username, hashed_password, wallet_account, is_active, created_at FROM users WHERE username = $1",
         username
     )
     
@@ -45,7 +45,7 @@ async def get_user_by_id(conn: asyncpg.Connection, user_id: int) -> Optional[Use
         User object if found, None otherwise
     """
     record = await conn.fetchrow(
-        "SELECT id, username, hashed_password, is_active, created_at FROM users WHERE id = $1",
+        "SELECT id, username, hashed_password, wallet_account, is_active, created_at FROM users WHERE id = $1",
         user_id
     )
     
@@ -70,7 +70,7 @@ async def search_users(conn: asyncpg.Connection, query: str, limit: int = 20) ->
     # Search for users where username contains the query (case-insensitive)
     records = await conn.fetch(
         """
-        SELECT id, username, hashed_password, is_active, created_at 
+        SELECT id, username, hashed_password, wallet_account, is_active, created_at 
         FROM users 
         WHERE username ILIKE $1 AND is_active = TRUE
         ORDER BY username
@@ -111,7 +111,7 @@ async def create_user(conn: asyncpg.Connection, username: str, password: str) ->
         """
         INSERT INTO users (username, hashed_password, is_active)
         VALUES ($1, $2, $3)
-        RETURNING id, username, hashed_password, is_active, created_at
+        RETURNING id, username, hashed_password, wallet_account, is_active, created_at
         """,
         username,
         hashed_pwd,

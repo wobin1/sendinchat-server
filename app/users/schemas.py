@@ -12,6 +12,7 @@ class UserOut(BaseModel):
     """Schema for user output (without password)."""
     id: int
     username: str
+    wallet_account: Optional[str] = None
     is_active: bool
     
     class Config:

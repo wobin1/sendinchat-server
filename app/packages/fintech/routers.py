@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Optional
 import logging
+import asyncpg
 
 from app.packages.fintech.schemas import (
     CreateWalletRequest, WalletResponse,
@@ -22,6 +23,10 @@ from app.packages.fintech.schemas import (
     StandardWebhookResponse
 )
 from app.packages.fintech import service as fintech_service
+from app.users.routers import get_current_user
+from app.users import service as user_service
+from app.users.models import User
+from app.db.database import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +73,57 @@ async def create_wallet(request: CreateWalletRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"status": "error", "message": "Wallet creation failed", "data": None}
+        )
+
+@router.post("/wallet/onboard", response_model=StandardWalletResponse, status_code=status.HTTP_201_CREATED)
+async def onboard_wallet(
+    request: CreateWalletRequest,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """
+    Create a new wallet and link it to the current user.
+    """
+    try:
+        # 1. Create the wallet via fintech service
+        result = await fintech_service.create_wallet(
+            bvn=request.bvn,
+            date_of_birth=request.dateOfBirth,
+            gender=request.gender,
+            last_name=request.lastName,
+            other_names=request.otherNames,
+            phone_no=request.phoneNo,
+            transaction_tracking_ref=request.transactionTrackingRef,
+            account_name=request.accountName,
+            place_of_birth=request.placeOfBirth,
+            address=request.address,
+            national_identity_no=request.nationalIdentityNo,
+            next_of_kin_phone_no=request.nextOfKinPhoneNo,
+            next_of_kin_name=request.nextOfKinName,
+            email=request.email
+        )
+        
+        # 2. Link the account number to the user in the database
+        account_no = result.get("accountNo")
+        if account_no:
+            await user_service.assign_wallet_account(conn, current_user.id, account_no)
+            logger.info(f"Linked wallet {account_no} to user {current_user.username}")
+        
+        return {
+            "status": "success",
+            "message": "Wallet created and linked successfully",
+            "data": WalletResponse(**result)
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e), "data": None}
+        )
+    except Exception as e:
+        logger.error(f"Wallet onboarding failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Wallet onboarding failed", "data": None}
         )
 
 
@@ -444,5 +500,3 @@ async def upgrade_status_webhook(payload: UpgradeStatusWebhookPayload):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"status": "error", "message": "Webhook processing failed", "data": None}
         )
-
-
