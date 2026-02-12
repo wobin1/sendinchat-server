@@ -14,7 +14,10 @@ logger = logging.getLogger(__name__)
 
 class WalletAPIError(Exception):
     """Custom exception for wallet API errors."""
-    pass
+    def __init__(self, message: str, status_code: Optional[int] = None, response_text: Optional[str] = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_text = response_text
 
 
 class WalletAPIClient:
@@ -137,7 +140,7 @@ class WalletAPIClient:
                 if response.status_code not in [200, 201]:
                     error_detail = response.text
                     logger.error(f"Wallet creation failed: {response.status_code} - {error_detail}")
-                    raise WalletAPIError(f"Wallet creation failed: {error_detail}")
+                    raise WalletAPIError(f"Wallet creation failed: {error_detail}", status_code=response.status_code, response_text=error_detail)
                 
                 data = response.json()
                 logger.info(f"Wallet created successfully: {data.get('accountNo', 'N/A')}")

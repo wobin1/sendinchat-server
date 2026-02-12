@@ -24,6 +24,24 @@
       "balance": 1150.0,
       "locked_balance": 0.0,
       "createdAt": "2026-02-12T08:21:49.082215Z"
+    },
+    {
+      "accountNo": "1100073795",
+      "accountName": "Nathaniel",
+      "bvn": "22267599804",
+      "dateOfBirth": "07/02/1990",
+      "gender": 1,
+      "lastName": "Musa",
+      "otherNames": "Dauda",
+      "phoneNo": "08101440236",
+      "email": "nathanielmusa3@gmail.com",
+      "placeOfBirth": "Kurfi",
+      "address": "first Ecwa church Janruwa",
+      "nationalIdentityNo": "53459719295",
+      "nextOfKinPhoneNo": "08028818019",
+      "nextOfKinName": "Dauda M Yanshio",
+      "balance": 0.0,
+      "createdAt": "2026-02-12T14:51:48.466930Z"
     }
   ],
   "transactions": [

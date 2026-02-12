@@ -149,6 +149,49 @@ async def create_wallet(
             "balance": result.get("balance", 0.0)
         }
     except WalletAPIError as e:
+        # Check if this is a DUPLICATE wallet error
+        if e.response_text:
+            try:
+                import json
+                error_data = json.loads(e.response_text)
+                if error_data.get("status") == "DUPLICATE":
+                    data = error_data.get("data", {})
+                    account_no = data.get("accountNumber") or data.get("accountNo")
+                    if account_no:
+                        logger.info(f"Duplicate wallet detected. Linking existing account: {account_no}")
+                        # Store in mock DB if not exists
+                        db = JsonDatabase.read()
+                        if not any(w['accountNo'] == account_no for w in db['wallets']):
+                            wallet = {
+                                "accountNo": account_no,
+                                "accountName": account_name,
+                                "bvn": bvn,
+                                "dateOfBirth": date_of_birth,
+                                "gender": gender,
+                                "lastName": last_name,
+                                "otherNames": other_names,
+                                "phoneNo": phone_no,
+                                "email": email,
+                                "placeOfBirth": place_of_birth,
+                                "address": address,
+                                "nationalIdentityNo": national_identity_no,
+                                "nextOfKinPhoneNo": next_of_kin_phone_no,
+                                "nextOfKinName": next_of_kin_name,
+                                "balance": 0.0,
+                                "createdAt": datetime.utcnow().isoformat() + "Z"
+                            }
+                            db['wallets'].append(wallet)
+                            JsonDatabase.write(db)
+                        
+                        return {
+                            "accountNo": account_no,
+                            "accountName": account_name,
+                            "bvn": bvn,
+                            "balance": 0.0
+                        }
+            except Exception as parse_err:
+                logger.error(f"Failed to parse DUPLICATE error response: {str(parse_err)}")
+
         logger.error(f"Third-party API error during wallet creation: {str(e)}")
         raise ValueError(f"Wallet creation failed: {str(e)}")
     except Exception as e:
