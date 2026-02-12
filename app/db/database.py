@@ -44,6 +44,7 @@ async def init_db():
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(255) UNIQUE NOT NULL,
                 hashed_password VARCHAR(255) NOT NULL,
+                wallet_account VARCHAR(20) UNIQUE,
                 is_active BOOLEAN DEFAULT TRUE NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -80,6 +81,8 @@ async def init_db():
                 chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
                 sender_id INTEGER NOT NULL REFERENCES users(id),
                 content TEXT NOT NULL,
+                message_type VARCHAR(20) DEFAULT 'text',
+                transaction_id VARCHAR(100),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -93,6 +96,14 @@ async def init_db():
                 PRIMARY KEY (chat_id, user_id)
             )
         """)
+        
+        # --- Automatic Migrations (for existing tables) ---
+        # Ensure users table has wallet_account
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_account VARCHAR(20) UNIQUE;")
+        
+        # Ensure messages table has new columns
+        await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'text';")
+        await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(100);")
         
         # Create indexes
         await conn.execute("""

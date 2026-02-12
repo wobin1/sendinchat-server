@@ -15,8 +15,15 @@
       "nationalIdentityNo": "12345678901",
       "nextOfKinPhoneNo": "08087654321",
       "nextOfKinName": "Next Kin",
-      "balance": 50000.00,
+      "balance": 49450.0,
+      "locked_balance": 400.0,
       "createdAt": "2025-01-01T00:00:00Z"
+    },
+    {
+      "accountNo": "0987654321",
+      "balance": 1150.0,
+      "locked_balance": 0.0,
+      "createdAt": "2026-02-12T08:21:49.082215Z"
     }
   ],
   "transactions": [
@@ -24,36 +31,112 @@
       "id": "TXN001",
       "type": "credit",
       "accountNo": "1000000001",
-      "amount": 50000.00,
+      "amount": 50000.0,
       "narration": "Initial deposit",
       "reference": "REF001",
       "status": "completed",
       "createdAt": "2025-01-01T00:00:00Z"
+    },
+    {
+      "id": "TXN20260212082924702887",
+      "type": "transfer",
+      "senderAccountNo": "1000000001",
+      "receiverAccountNo": "0987654321",
+      "amount": 150.0,
+      "narration": "Chat transfer completed",
+      "status": "completed",
+      "createdAt": "2026-02-12T08:29:24.395933Z"
     }
   ],
   "banks": [
-    {"code": "044", "name": "Access Bank"},
-    {"code": "063", "name": "Access Bank (Diamond)"},
-    {"code": "050", "name": "Ecobank Nigeria"},
-    {"code": "070", "name": "Fidelity Bank"},
-    {"code": "011", "name": "First Bank of Nigeria"},
-    {"code": "214", "name": "First City Monument Bank"},
-    {"code": "058", "name": "Guaranty Trust Bank"},
-    {"code": "030", "name": "Heritage Bank"},
-    {"code": "301", "name": "Jaiz Bank"},
-    {"code": "082", "name": "Keystone Bank"},
-    {"code": "526", "name": "Parallex Bank"},
-    {"code": "076", "name": "Polaris Bank"},
-    {"code": "101", "name": "Providus Bank"},
-    {"code": "221", "name": "Stanbic IBTC Bank"},
-    {"code": "068", "name": "Standard Chartered Bank"},
-    {"code": "232", "name": "Sterling Bank"},
-    {"code": "100", "name": "Suntrust Bank"},
-    {"code": "032", "name": "Union Bank of Nigeria"},
-    {"code": "033", "name": "United Bank for Africa"},
-    {"code": "215", "name": "Unity Bank"},
-    {"code": "035", "name": "Wema Bank"},
-    {"code": "057", "name": "Zenith Bank"}
+    {
+      "code": "044",
+      "name": "Access Bank"
+    },
+    {
+      "code": "063",
+      "name": "Access Bank (Diamond)"
+    },
+    {
+      "code": "050",
+      "name": "Ecobank Nigeria"
+    },
+    {
+      "code": "070",
+      "name": "Fidelity Bank"
+    },
+    {
+      "code": "011",
+      "name": "First Bank of Nigeria"
+    },
+    {
+      "code": "214",
+      "name": "First City Monument Bank"
+    },
+    {
+      "code": "058",
+      "name": "Guaranty Trust Bank"
+    },
+    {
+      "code": "030",
+      "name": "Heritage Bank"
+    },
+    {
+      "code": "301",
+      "name": "Jaiz Bank"
+    },
+    {
+      "code": "082",
+      "name": "Keystone Bank"
+    },
+    {
+      "code": "526",
+      "name": "Parallex Bank"
+    },
+    {
+      "code": "076",
+      "name": "Polaris Bank"
+    },
+    {
+      "code": "101",
+      "name": "Providus Bank"
+    },
+    {
+      "code": "221",
+      "name": "Stanbic IBTC Bank"
+    },
+    {
+      "code": "068",
+      "name": "Standard Chartered Bank"
+    },
+    {
+      "code": "232",
+      "name": "Sterling Bank"
+    },
+    {
+      "code": "100",
+      "name": "Suntrust Bank"
+    },
+    {
+      "code": "032",
+      "name": "Union Bank of Nigeria"
+    },
+    {
+      "code": "033",
+      "name": "United Bank for Africa"
+    },
+    {
+      "code": "215",
+      "name": "Unity Bank"
+    },
+    {
+      "code": "035",
+      "name": "Wema Bank"
+    },
+    {
+      "code": "057",
+      "name": "Zenith Bank"
+    }
   ],
   "clients": [
     {

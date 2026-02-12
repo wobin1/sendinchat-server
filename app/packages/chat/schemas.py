@@ -14,11 +14,25 @@ class MessageOut(BaseModel):
     sender_id: int
     sender_username: str
     content: str
+    message_type: str = "text"
+    transaction_id: Optional[str] = None
+    transaction_status: Optional[str] = None
     created_at: datetime
 
 class SendMessageRequest(BaseModel):
     """Request model for sending a message"""
     content: str
+
+class InitiateTransferRequest(BaseModel):
+    """Request model for initiating a transfer in chat"""
+    chat_id: int
+    amount: float
+    narration: Optional[str] = "Chat transfer"
+
+class HandleTransferRequest(BaseModel):
+    """Request model for accepting/rejecting a transfer"""
+    message_id: int
+    action: str  # "accept" or "reject"
 
 class ChatOut(BaseModel):
     """Response model for chat details"""

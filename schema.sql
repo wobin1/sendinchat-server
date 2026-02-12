@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
     hashed_password VARCHAR(255) NOT NULL,
+    wallet_account VARCHAR(20) UNIQUE,
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -46,6 +47,8 @@ CREATE TABLE IF NOT EXISTS messages (
     chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     sender_id INTEGER NOT NULL REFERENCES users(id),
     content TEXT NOT NULL,
+    message_type VARCHAR(20) DEFAULT 'text',
+    transaction_id VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

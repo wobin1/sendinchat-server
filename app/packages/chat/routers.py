@@ -11,7 +11,8 @@ from app.users import service as user_service
 from app.packages.chat.schemas import (
     CreateChatRequest, ChatOut, SendMessageRequest, MessageOut,
     StandardMessageResponse, StandardMessagesResponse,
-    StandardChatResponse, StandardChatsResponse, StandardMemberResponse
+    StandardChatResponse, StandardChatsResponse, StandardMemberResponse,
+    InitiateTransferRequest, HandleTransferRequest
 )
 from app.packages.chat import service as chat_service
 from app.core.security import verify_token
@@ -24,6 +25,24 @@ logger = logging.getLogger(__name__)
 active_connections: Dict[int, Set[Tuple[WebSocket, int]]] = {}
 
 
+async def broadcast_to_chat(chat_id: int, message_data: dict):
+    """
+    Broadcast a message to all connected users in a chat.
+    """
+    if chat_id in active_connections:
+        disconnected = set()
+        for ws, _ in active_connections[chat_id]:
+            try:
+                await ws.send_json(message_data)
+            except:
+                disconnected.add((ws, _))
+        
+        # Clean up disconnected clients
+        active_connections[chat_id] -= disconnected
+        if not active_connections[chat_id]:
+            del active_connections[chat_id]
+
+
 @router.websocket("/ws/{chat_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -32,12 +51,9 @@ async def websocket_endpoint(
 ):
     """
     Authenticated WebSocket endpoint for real-time chat.
-    
-    Authenticates user via JWT token passed as query parameter,
-    validates chat access, and broadcasts messages to all connected users.
     """
     # Get database connection for authentication
-    from db.database import get_pool
+    from app.db.database import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Authenticate user
@@ -98,21 +114,12 @@ async def websocket_endpoint(
                 "sender_id": user.id,
                 "sender_username": user.username,
                 "content": message_record["content"],
+                "message_type": message_record.get("message_type", "text"),
+                "transaction_id": message_record.get("transaction_id"),
                 "created_at": message_record["created_at"].isoformat()
             }
             
-            # Send to all connections in this chat
-            if chat_id in active_connections:
-                disconnected = set()
-                for ws, _ in active_connections[chat_id]:
-                    try:
-                        await ws.send_json(message_data)
-                    except:
-                        disconnected.add((ws, _))
-                
-                # Clean up disconnected clients
-                active_connections[chat_id] -= disconnected
-                
+            await broadcast_to_chat(chat_id, message_data)
             logger.info(f"Message from {user.username} in chat {chat_id}: {data.get('content', '')}")
             
     except WebSocketDisconnect:
@@ -126,6 +133,92 @@ async def websocket_endpoint(
             if not active_connections[chat_id]:
                 del active_connections[chat_id]
         logger.info(f"WebSocket connection closed for user {user.username} in chat {chat_id}")
+
+
+@router.post("/transfer/initiate", response_model=StandardMessageResponse)
+async def initiate_transfer(
+    request: InitiateTransferRequest,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """
+    Initiate a money transfer within a chat.
+    """
+    try:
+        message = await chat_service.initiate_transfer_in_chat(
+            conn=conn,
+            chat_id=request.chat_id,
+            sender_id=current_user.id,
+            amount=request.amount,
+            narration=request.narration
+        )
+        
+        # Broadcast via WebSocket
+        message_data = {
+            "type": "transfer_initiated",
+            "id": message["id"],
+            "chat_id": request.chat_id,
+            "sender_id": current_user.id,
+            "sender_username": current_user.username,
+            "content": message["content"],
+            "message_type": "transfer",
+            "transaction_id": message["transaction_id"],
+            "transaction_status": message["transaction_status"],
+            "created_at": message["created_at"].isoformat()
+        }
+        await broadcast_to_chat(request.chat_id, message_data)
+        
+        # Format response
+        message["sender_username"] = current_user.username
+        return {
+            "status": "success",
+            "message": "Transfer initiated successfully",
+            "data": message
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e), "data": None}
+        )
+
+
+@router.post("/transfer/handle", response_model=StandardMessageResponse)
+async def handle_transfer(
+    request: HandleTransferRequest,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """
+    Accept or reject a money transfer.
+    """
+    try:
+        result = await chat_service.handle_transfer_action(
+            conn=conn,
+            message_id=request.message_id,
+            user_id=current_user.id,
+            action=request.action
+        )
+        
+        # Broadcast the update
+        update_data = {
+            "type": "transfer_updated",
+            "message_id": request.message_id,
+            "chat_id": result["chat_id"],
+            "transaction_id": result["transaction_id"],
+            "status": result["status"]
+        }
+        await broadcast_to_chat(result["chat_id"], update_data)
+        
+        return {
+            "status": "success",
+            "message": f"Transfer {request.action}ed successfully",
+            "data": result
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e), "data": None}
+        )
 
 
 @router.post("/send_message", response_model=StandardMessageResponse)

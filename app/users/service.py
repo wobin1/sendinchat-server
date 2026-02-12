@@ -234,3 +234,17 @@ async def update_password(conn: asyncpg.Connection, user_id: int, new_password: 
         return True
     
     return False
+
+
+async def assign_wallet_account(conn: asyncpg.Connection, user_id: int, wallet_account: str) -> bool:
+    """
+    Assign a wallet account number to a user.
+    """
+    result = await conn.execute(
+        "UPDATE users SET wallet_account = $1 WHERE id = $2",
+        wallet_account,
+        user_id
+    )
+    
+    rows_affected = int(result.split()[-1])
+    return rows_affected > 0

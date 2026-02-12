@@ -849,3 +849,116 @@ def authenticate_client(client_id: str, client_secret: str) -> Dict[str, Any]:
         "expires_in": 3600,
         "client_name": client.get('name', 'Unknown Client')
     }
+
+
+# ============= 9. Escrow (Hold) Logic =============
+async def hold_funds(account_no: str, amount: float) -> Dict[str, Any]:
+    """
+    Deduct funds from balance and place in locked_balance.
+    
+    Raises:
+        ValueError: If account not found or insufficient balance
+    """
+    logger.info(f"Holding {amount} for account {account_no}")
+    db = JsonDatabase.read()
+    
+    wallet = next((w for w in db['wallets'] if w['accountNo'] == account_no), None)
+    if not wallet:
+        raise ValueError(f"Account {account_no} not found")
+    
+    if wallet['balance'] < amount:
+        raise ValueError(f"Insufficient balance. Available: {wallet['balance']}, Required: {amount}")
+    
+    wallet['balance'] -= amount
+    wallet['locked_balance'] = wallet.get('locked_balance', 0.0) + amount
+    
+    JsonDatabase.write(db)
+    
+    return {
+        "accountNo": account_no,
+        "amount": amount,
+        "newBalance": wallet['balance'],
+        "lockedBalance": wallet['locked_balance']
+    }
+
+
+async def release_funds(account_no: str, amount: float) -> Dict[str, Any]:
+    """
+    Return funds from locked_balance to balance.
+    
+    Raises:
+        ValueError: If account not found or insufficient locked balance
+    """
+    logger.info(f"Releasing {amount} for account {account_no}")
+    db = JsonDatabase.read()
+    
+    wallet = next((w for w in db['wallets'] if w['accountNo'] == account_no), None)
+    if not wallet:
+        raise ValueError(f"Account {account_no} not found")
+    
+    locked = wallet.get('locked_balance', 0.0)
+    if locked < amount:
+        raise ValueError(f"Insufficient locked balance. Available: {locked}, Required: {amount}")
+    
+    wallet['balance'] += amount
+    wallet['locked_balance'] = locked - amount
+    
+    JsonDatabase.write(db)
+    
+    return {
+        "accountNo": account_no,
+        "amount": amount,
+        "newBalance": wallet['balance'],
+        "lockedBalance": wallet['locked_balance']
+    }
+
+
+async def complete_transfer_from_hold(
+    sender_account: str,
+    receiver_account: str,
+    amount: float,
+    narration: str = "Chat transfer completed"
+) -> Dict[str, Any]:
+    """
+    Complete a transfer by moving funds from sender's locked_balance to receiver's balance.
+    """
+    logger.info(f"Completing transfer for {amount} from {sender_account} to {receiver_account}")
+    db = JsonDatabase.read()
+    
+    sender_wallet = next((w for w in db['wallets'] if w['accountNo'] == sender_account), None)
+    receiver_wallet = next((w for w in db['wallets'] if w['accountNo'] == receiver_account), None)
+    
+    if not sender_wallet:
+        raise ValueError(f"Sender account {sender_account} not found")
+    if not receiver_wallet:
+        raise ValueError(f"Receiver account {receiver_account} not found")
+        
+    sender_locked = sender_wallet.get('locked_balance', 0.0)
+    if sender_locked < amount:
+        raise ValueError(f"Insufficient locked balance for sender. Available: {sender_locked}, Required: {amount}")
+        
+    # Process transfer
+    sender_wallet['locked_balance'] = sender_locked - amount
+    receiver_wallet['balance'] += amount
+    
+    # Create transaction record
+    transaction_id = generate_transaction_id()
+    transaction = {
+        "id": transaction_id,
+        "type": "transfer",
+        "senderAccountNo": sender_account,
+        "receiverAccountNo": receiver_account,
+        "amount": amount,
+        "narration": narration,
+        "status": "completed",
+        "createdAt": datetime.utcnow().isoformat() + "Z"
+    }
+    db['transactions'].append(transaction)
+    
+    JsonDatabase.write(db)
+    
+    return {
+        "transactionId": transaction_id,
+        "senderNewLockedBalance": sender_wallet['locked_balance'],
+        "receiverNewBalance": receiver_wallet['balance']
+    }

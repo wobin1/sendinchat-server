@@ -12,24 +12,14 @@ async def send_message(
     conn: asyncpg.Connection,
     chat_id: int,
     sender_id: int,
-    message: str
+    message: str,
+    message_type: str = "text",
+    transaction_id: Optional[str] = None
 ) -> dict:
     """
     Send a message to a chat.
-    
-    Args:
-        conn: Database connection
-        chat_id: Chat room ID
-        sender_id: ID of the user sending the message
-        message: Message content
-        
-    Returns:
-        Dictionary with message details
-        
-    Raises:
-        ValueError: If user does not have access to the chat
     """
-    logger.info(f"User {sender_id} sending message to chat {chat_id}: {message}")
+    logger.info(f"User {sender_id} sending {message_type} message to chat {chat_id}")
     
     # Validate user has access to chat
     has_access = await validate_chat_access(conn, chat_id, sender_id)
@@ -39,11 +29,11 @@ async def send_message(
     # Insert message into database
     record = await conn.fetchrow(
         """
-        INSERT INTO messages (chat_id, sender_id, content)
-        VALUES ($1, $2, $3)
-        RETURNING id, chat_id, sender_id, content, created_at
+        INSERT INTO messages (chat_id, sender_id, content, message_type, transaction_id)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, chat_id, sender_id, content, message_type, transaction_id, created_at
         """,
-        chat_id, sender_id, message
+        chat_id, sender_id, message, message_type, transaction_id
     )
     
     return dict(record)
@@ -57,24 +47,17 @@ async def get_chat_messages(
 ) -> list:
     """
     Retrieve messages from a chat.
-    
-    Args:
-        conn: Database connection
-        chat_id: Chat room ID
-        limit: Maximum number of messages to return
-        offset: Number of messages to skip
-        
-    Returns:
-        List of message dictionaries with sender information
     """
     logger.info(f"Retrieving messages for chat {chat_id}")
     
     records = await conn.fetch(
         """
         SELECT m.id, m.chat_id, m.sender_id, u.username as sender_username, 
-               m.content, m.created_at
+               m.content, m.message_type, m.transaction_id, t.status as transaction_status,
+               m.created_at
         FROM messages m
         JOIN users u ON m.sender_id = u.id
+        LEFT JOIN transactions t ON m.transaction_id = t.id::text
         WHERE m.chat_id = $1
         ORDER BY m.created_at ASC
         LIMIT $2 OFFSET $3
@@ -83,6 +66,124 @@ async def get_chat_messages(
     )
     
     return [dict(record) for record in records]
+
+
+async def initiate_transfer_in_chat(
+    conn: asyncpg.Connection,
+    chat_id: int,
+    sender_id: int,
+    amount: float,
+    narration: str = "Chat transfer"
+) -> dict:
+    """
+    Initiate a transfer within a chat.
+    1. Find recipient in chat
+    2. Create pending transaction
+    3. Hold funds in fintech service
+    4. Send transfer message
+    """
+    # For direct chats only for now
+    partner = await get_direct_chat_partner(conn, chat_id, sender_id)
+    if not partner:
+        raise ValueError("Transfer only supported in direct chats for now")
+    
+    receiver_id = partner['id']
+    
+    # Get wallet accounts
+    sender = await conn.fetchrow("SELECT wallet_account FROM users WHERE id = $1", sender_id)
+    receiver = await conn.fetchrow("SELECT wallet_account FROM users WHERE id = $1", receiver_id)
+    
+    if not sender['wallet_account'] or not receiver['wallet_account']:
+        raise ValueError("Both users must have wallet accounts linked")
+        
+    from app.packages.fintech import service as fintech_service
+    
+    # Create transaction record first (pending)
+    txn_record = await conn.fetchrow(
+        """
+        INSERT INTO transactions (sender_id, receiver_id, amount, status)
+        VALUES ($1, $2, $3, 'pending')
+        RETURNING id, status
+        """,
+        sender_id, receiver_id, amount
+    )
+    
+    # Hold funds
+    await fintech_service.hold_funds(sender['wallet_account'], amount)
+    
+    # Send system message about transfer
+    message = await send_message(
+        conn=conn,
+        chat_id=chat_id,
+        sender_id=sender_id,
+        message=f"Sent {amount}",
+        message_type="transfer",
+        transaction_id=str(txn_record['id'])
+    )
+    
+    message['transaction_status'] = txn_record['status']
+    return message
+
+
+async def handle_transfer_action(
+    conn: asyncpg.Connection,
+    message_id: int,
+    user_id: int,
+    action: str  # "accept" or "reject"
+) -> dict:
+    """
+    Handle recipient action on a transfer message.
+    """
+    # Get message and transaction details
+    msg = await conn.fetchrow(
+        """
+        SELECT m.id, m.chat_id, m.sender_id, m.transaction_id, t.amount, t.status
+        FROM messages m
+        JOIN transactions t ON m.transaction_id = t.id::text
+        WHERE m.id = $1
+        """,
+        message_id
+    )
+    
+    if not msg or not msg['transaction_id']:
+        raise ValueError("Transfer message not found")
+        
+    if msg['status'] != 'pending':
+        raise ValueError(f"Transfer is already {msg['status']}")
+        
+    # Verify user is the recipient
+    partner = await get_direct_chat_partner(conn, msg['chat_id'], msg['sender_id'])
+    if partner['id'] != user_id:
+        raise ValueError("Only the recipient can handle the transfer")
+        
+    from app.packages.fintech import service as fintech_service
+    
+    sender_wallet = await conn.fetchval("SELECT wallet_account FROM users WHERE id = $1", msg['sender_id'])
+    receiver_wallet = await conn.fetchval("SELECT wallet_account FROM users WHERE id = $1", user_id)
+    
+    amount = float(msg['amount'])
+    
+    if action == "accept":
+        await fintech_service.complete_transfer_from_hold(sender_wallet, receiver_wallet, amount)
+        new_status = 'completed'
+    elif action == "reject":
+        await fintech_service.release_funds(sender_wallet, amount)
+        new_status = 'rejected'
+    else:
+        raise ValueError("Invalid action")
+        
+    # Update transaction status
+    await conn.execute(
+        "UPDATE transactions SET status = $1 WHERE id = $2",
+        new_status, int(msg['transaction_id'])
+    )
+    
+    return {
+        "message_id": message_id,
+        "chat_id": msg['chat_id'],
+        "transaction_id": msg['transaction_id'],
+        "status": new_status
+    }
 
 
 async def create_chat_room(
