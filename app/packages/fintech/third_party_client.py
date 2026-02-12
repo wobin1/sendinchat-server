@@ -22,6 +22,7 @@ class WalletAPIClient:
     
     def __init__(self):
         self.base_url = settings.WALLET_API_BASE_URL
+        self.auth_url = settings.WALLET_AUTH_API_BASE_URL
         self.username = settings.WALLET_API_USERNAME
         self.password = settings.WALLET_API_PASSWORD
         self.client_id = settings.WALLET_API_CLIENT_ID
@@ -39,56 +40,74 @@ class WalletAPIClient:
     
     async def authenticate(self) -> Dict[str, Any]:
         """
-        Authenticate with the third-party wallet API.
-        Note: This creates authentication headers for subsequent requests.
-        The third-party API uses credentials in request headers rather than a separate auth endpoint.
+        Authenticate with the third-party wallet API to get an access token.
         
         Returns:
-            Dict containing authentication status
+            Dict containing authentication status and token info
             
         Raises:
-            WalletAPIError: If authentication setup fails
+            WalletAPIError: If authentication fails
         """
-        logger.info("Setting up authentication for third-party wallet API")
+        logger.info("Authenticating with third-party wallet API")
         
-        try:
-            # For this API, we don't have a separate auth endpoint
-            # Authentication is done via credentials in each request
-            # We'll just validate that credentials are set
-            if not self.client_id or not self.client_secret:
-                raise WalletAPIError("Client ID and Client Secret are required")
+        if not self.auth_url:
+            raise WalletAPIError("WALLET_AUTH_API_BASE_URL is not configured")
             
-            # Mark as authenticated
-            self._access_token = "authenticated"  # Placeholder since we use credentials directly
-            self._token_expiry = datetime.utcnow() + timedelta(hours=24)
-            
-            logger.info("Authentication credentials validated")
-            return {
-                "status": "authenticated",
-                "message": "Using credential-based authentication"
-            }
-                
-        except Exception as e:
-            logger.error(f"Authentication setup error: {str(e)}")
-            raise WalletAPIError(f"Authentication error: {str(e)}")
-    
-    async def _get_auth_headers(self) -> Dict[str, str]:
-        """
-        Get authentication headers with credentials.
-        
-        Returns:
-            Dict containing authorization headers with credentials
-        """
-        # Build auth headers with credentials
-        headers = {
-            "Content-Type": "application/json",
+        payload = {
             "username": self.username,
             "password": self.password,
             "clientId": self.client_id,
             "clientSecret": self.client_secret
         }
         
-        return headers
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.auth_url}/authenticate",
+                    json=payload
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Authentication failed: {response.status_code} - {error_detail}")
+                    raise WalletAPIError(f"Authentication failed: {error_detail}")
+                
+                data = response.json()
+                self._access_token = data.get("accessToken")
+                
+                if not self._access_token:
+                    logger.error("Authentication successful but no access token received")
+                    raise WalletAPIError("No access token in response")
+                
+                # Set expiry (default to 1 hour if not provided)
+                expires_in = int(data.get("expiresIn", 3600))
+                self._token_expiry = datetime.utcnow() + timedelta(seconds=expires_in - 60)  # 1 min buffer
+                
+                logger.info("Authentication successful, token retrieved")
+                return data
+                
+        except httpx.RequestError as e:
+            logger.error(f"Network error during authentication: {str(e)}")
+            raise WalletAPIError(f"Network error during authentication: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during authentication: {str(e)}")
+            raise WalletAPIError(f"Authentication error: {str(e)}")
+    
+    async def _get_auth_headers(self) -> Dict[str, str]:
+        """
+        Get authentication headers with the access token.
+        Auto-refreshes token if expired.
+        
+        Returns:
+            Dict containing authorization headers
+        """
+        if not self._is_token_valid():
+            await self.authenticate()
+            
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._access_token}"
+        }
     
     async def create_wallet(self, wallet_data: Dict[str, Any]) -> Dict[str, Any]:
         """

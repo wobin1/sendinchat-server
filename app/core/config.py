@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     
     # Third-Party Wallet API
     WALLET_API_BASE_URL: str = "http://102.216.128.75:9090/waas/api/v1"
+    WALLET_AUTH_API_BASE_URL: str = ""
     WALLET_API_USERNAME: str = ""
     WALLET_API_PASSWORD: str = ""
     WALLET_API_CLIENT_ID: str = ""
