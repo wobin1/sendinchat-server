@@ -116,6 +116,19 @@ async def init_db():
         await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'text';")
         await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(100);")
         
+        # --- Retroactive Contact Migration ---
+        # Add all existing direct chat participants to each other's contacts if not already present
+        await conn.execute("""
+            INSERT INTO contacts (user_id, contact_id)
+            SELECT DISTINCT cm1.user_id, cm2.user_id
+            FROM chats c
+            JOIN chat_members cm1 ON c.id = cm1.chat_id
+            JOIN chat_members cm2 ON c.id = cm2.chat_id
+            WHERE c.chat_type = 'direct'
+            AND cm1.user_id != cm2.user_id
+            ON CONFLICT (user_id, contact_id) DO NOTHING
+        """)
+        
         # Create indexes
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)

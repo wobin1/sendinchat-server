@@ -288,6 +288,10 @@ async def create_or_get_direct_chat(
     
     if existing_chat:
         logger.info(f"Found existing direct chat {existing_chat['id']}")
+        # Add to each other's contacts idempotently even for existing chats
+        from app.users import contacts_service
+        await contacts_service.add_contact(conn, user1_id, user2_id)
+        await contacts_service.add_contact(conn, user2_id, user1_id)
         return dict(existing_chat)
     
     # Create new direct chat
