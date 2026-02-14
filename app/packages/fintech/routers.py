@@ -335,7 +335,8 @@ async def wallet_enquiry(request: WalletEnquiryRequest):
                 accountName=result.get("name", result.get("accountName", "Unknown")),
                 balance=parse_amount(result.get("availableBalance", result.get("balance"))),
                 phoneNo=result.get("phoneNo", result.get("phoneNumber", "")),
-                email=result.get("email", "")
+                email=result.get("email", ""),
+                tier=str(result.get("tier", "1"))
             )
         }
     except ValueError as e:

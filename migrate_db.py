@@ -21,7 +21,23 @@ async def migrate():
         
         # Add transaction_id to messages table
         print("Adding transaction_id to messages table...")
-        await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(100);")
+        try:
+            await conn.execute("ALTER TABLE messages ADD COLUMN transaction_id VARCHAR(100)")
+        except Exception:
+            pass
+
+        # Create contacts table
+        print("Creating contacts table...")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS contacts (
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                contact_id INTEGER NOT NULL REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, contact_id),
+                CONSTRAINT check_self_contact CHECK (user_id != contact_id)
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id)")
         
         print("\nVerifying columns...")
         user_cols = await conn.fetch("SELECT column_name FROM information_schema.columns WHERE table_name = 'users';")

@@ -166,6 +166,7 @@ class WalletEnquiryResponse(BaseModel):
     balance: float
     phoneNo: str
     email: str
+    tier: Optional[str] = None
     status: str = "active"
 
 

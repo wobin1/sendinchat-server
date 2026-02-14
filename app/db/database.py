@@ -97,6 +97,17 @@ async def init_db():
             )
         """)
         
+        # Create contacts table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS contacts (
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                contact_id INTEGER NOT NULL REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, contact_id),
+                CONSTRAINT check_self_contact CHECK (user_id != contact_id)
+            )
+        """)
+        
         # --- Automatic Migrations (for existing tables) ---
         # Ensure users table has wallet_account
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_account VARCHAR(20) UNIQUE;")
@@ -140,4 +151,8 @@ async def init_db():
         
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_chat_members_user ON chat_members(user_id)
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id)
         """)

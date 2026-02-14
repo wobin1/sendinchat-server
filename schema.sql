@@ -67,3 +67,14 @@ CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_members_user ON chat_members(user_id);
+-- Contacts table: tracks explicit user relationships
+CREATE TABLE IF NOT EXISTS contacts (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    contact_id INTEGER NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, contact_id),
+    CONSTRAINT check_self_contact CHECK (user_id != contact_id)
+);
+
+-- Index for contact performance
+CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);

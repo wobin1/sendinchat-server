@@ -8,6 +8,7 @@ from app.db.database import get_connection
 from app.users.models import User
 from app.users.schemas import UserCreate, UserOut, Token, UserResponse, TokenResponse
 from app.users import service as user_service
+from app.users import contacts_service
 from app.core.security import create_access_token, verify_token
 from app.core.config import settings
 
@@ -173,4 +174,46 @@ async def search_users(
         "status": "success",
         "message": f"Found {len(users_data)} users",
         "data": users_data
+    }
+
+
+@router.get("/contacts")
+async def get_contacts(
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """Get all contacts for the current user."""
+    contacts = await contacts_service.get_user_contacts(conn, current_user.id)
+    
+    # Format dates
+    for c in contacts:
+        if c['created_at']:
+            c['created_at'] = c['created_at'].isoformat()
+            
+    return {
+        "status": "success",
+        "message": f"Retrieved {len(contacts)} contacts",
+        "data": contacts
+    }
+
+
+@router.post("/contacts/{contact_id}")
+async def add_contact(
+    contact_id: int,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """Manually add a contact."""
+    success = await contacts_service.add_contact(conn, current_user.id, contact_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to add contact"
+        )
+        
+    return {
+        "status": "success",
+        "message": "Contact added successfully",
+        "data": None
     }

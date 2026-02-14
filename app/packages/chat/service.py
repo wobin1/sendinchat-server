@@ -310,7 +310,12 @@ async def create_or_get_direct_chat(
             chat_record['id'], user1_id, user2_id
         )
         
-        logger.info(f"Created new direct chat {chat_record['id']}")
+        # Add to each other's contacts automatically
+        from app.users import contacts_service
+        await contacts_service.add_contact(conn, user1_id, user2_id)
+        await contacts_service.add_contact(conn, user2_id, user1_id)
+        
+        logger.info(f"Created new direct chat {chat_record['id']} and added users to each other's contacts")
         return dict(chat_record)
 
 
