@@ -20,7 +20,8 @@ from app.packages.fintech.schemas import (
     StandardWalletTransactionsResponse, StandardBankListResponse,
     StandardClientAuthResponse, StandardWalletUpgradeResponse,
     StandardUpgradeStatusResponse, StandardGetWalletByBVNResponse,
-    StandardWebhookResponse
+    StandardWebhookResponse,
+    OtherBankEnquiryRequest, ExternalTransferRequest
 )
 from app.packages.fintech import service as fintech_service
 from app.users.routers import get_current_user
@@ -168,6 +169,92 @@ async def bank_transfer(request: BankTransferRequest):
         )
 
 
+@router.post("/transfer/external", response_model=StandardBankTransferResponse, status_code=status.HTTP_200_OK)
+async def transfer_external(
+    request: ExternalTransferRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Transfer funds from user's wallet to another bank.
+    """
+    if not current_user.wallet_account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "User does not have a wallet account", "data": None}
+        )
+    
+    try:
+        result = await fintech_service.transfer_to_other_bank(
+            sender_account_no=current_user.wallet_account,
+            amount=request.amount,
+            recipient_account_no=request.recipientAccountNumber,
+            recipient_name=request.recipientName,
+            recipient_bank_code=request.recipientBankCode,
+            narration=request.narration
+        )
+        # Transform result to BankTransferResponse
+        # API return usually includes transactionReference, etc.
+        data = result.get("data", {})
+        txn = data.get("transaction", {})
+        cust = data.get("customer", {})
+        
+        return {
+            "status": "success",
+            "message": "External transfer initiated successfully",
+            "data": {
+                "transactionReference": txn.get("reference", "N/A"),
+                "amount": str(request.amount),
+                "recipientAccount": cust.get("accountNumber", request.recipientAccountNumber),
+                "recipientBank": cust.get("bankCode", request.recipientBankCode)
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e), "data": None}
+        )
+    except Exception as e:
+        logger.error(f"External transfer failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "External transfer failed", "data": None}
+        )
+
+
+@router.post("/enquiry/other-bank", response_model=StandardWalletEnquiryResponse, status_code=status.HTTP_200_OK)
+async def other_bank_enquiry(request: OtherBankEnquiryRequest):
+    """
+    Verify account details in another bank.
+    """
+    try:
+        result = await fintech_service.account_enquiry_other_bank(
+            account_no=request.accountNumber,
+            bank_code=request.bankCode
+        )
+        return {
+            "status": "success",
+            "message": "Account enquiry successful",
+            "data": {
+                "accountNo": result.get("accountNumber"),
+                "accountName": result.get("accountName"),
+                "balance": 0.0,  # Other bank enquiry doesn't return balance usually
+                "phoneNo": "",
+                "email": ""
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": str(e), "data": None}
+        )
+    except Exception as e:
+        logger.error(f"Account enquiry failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Account enquiry failed", "data": None}
+        )
+
+
 # ============= 3. Wallet Transfer (P2P) =============
 @router.post("/wallet/transfer", response_model=StandardWalletTransferResponse, status_code=status.HTTP_200_OK)
 async def transfer_wallet(request: WalletTransferRequest):
@@ -219,14 +306,42 @@ async def wallet_enquiry(request: WalletEnquiryRequest):
     This endpoint retrieves wallet information.
     """
     try:
-        result = fintech_service.get_wallet_enquiry(
+        # Use API version if user has a wallet account, else fallback to mock (or vice-versa)
+        # Actually, let's always use API version for consistency if it's integrated
+        result = await fintech_service.get_wallet_balance_api(
             account_no=request.accountNo
         )
         return {
             "status": "success",
             "message": "Wallet enquiry successful",
-            "data": WalletEnquiryResponse(**result)
+            "data": WalletEnquiryResponse(
+                accountNo=result.get("accountNumber", request.accountNo),
+                accountName=result.get("accountName", "Unknown"),
+                balance=float(result.get("balance", 0.0)),
+                phoneNo=result.get("phoneNumber", ""),
+                email=result.get("email", "")
+            )
         }
+    except ValueError as e:
+        # Fallback to local DB for now to avoid breaking UI if API is down/throttled
+        try:
+            result = fintech_service.get_wallet_enquiry(account_no=request.accountNo)
+            return {
+                "status": "success",
+                "message": "Wallet enquiry successful (local)",
+                "data": WalletEnquiryResponse(**result)
+            }
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"status": "error", "message": str(e), "data": None}
+            )
+    except Exception as e:
+        logger.error(f"Wallet enquiry failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Wallet enquiry failed", "data": None}
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -249,17 +364,60 @@ async def wallet_transactions(request: WalletTransactionsRequest):
     This endpoint retrieves transaction history for a wallet within a date range.
     """
     try:
-        result = fintech_service.get_wallet_transactions(
+        result = await fintech_service.get_transactions_history_api(
             account_number=request.accountNumber,
             from_date=request.fromDate,
             to_date=request.toDate,
-            number_of_items=request.numberOfItems
+            number_of_items=int(request.numberOfItems)
         )
+        # Transform API transactions to TransactionItem format
+        txns = []
+        for t in result:
+            txns.append(TransactionItem(
+                id=str(t.get("id", "")),
+                type=t.get("transactionType", "TRANSFER"),
+                amount=float(t.get("amount", 0.0)),
+                narration=t.get("narration", ""),
+                reference=t.get("reference", ""),
+                status=t.get("status", "completed"),
+                createdAt=t.get("transactionDate", ""),
+                otherParty=t.get("otherParty")
+            ))
+            
         return {
             "status": "success",
             "message": "Wallet transactions retrieved successfully",
-            "data": WalletTransactionsResponse(**result)
+            "data": WalletTransactionsResponse(
+                accountNumber=request.accountNumber,
+                transactions=txns,
+                totalCount=len(txns)
+            )
         }
+    except ValueError as e:
+        # Fallback to local
+        try:
+            result = fintech_service.get_wallet_transactions(
+                account_number=request.accountNumber,
+                from_date=request.fromDate,
+                toDate=request.toDate,
+                number_of_items=request.numberOfItems
+            )
+            return {
+                "status": "success",
+                "message": "Wallet transactions retrieved successfully (local)",
+                "data": WalletTransactionsResponse(**result)
+            }
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"status": "error", "message": str(e), "data": None}
+            )
+    except Exception as e:
+        logger.error(f"Wallet transactions query failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Wallet transactions query failed", "data": None}
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -282,10 +440,20 @@ async def get_banks():
     This endpoint returns all available banks for transfers.
     """
     try:
-        result = fintech_service.get_bank_list()
+        result = await fintech_service.get_banks_api()
+        banks = [BankInfo(code=b.get("code"), name=b.get("name")) for b in result]
         return {
             "status": "success",
             "message": "Bank list retrieved successfully",
+            "data": BankListResponse(banks=banks, count=len(banks))
+        }
+    except Exception as e:
+        # Fallback to local
+        logger.warning(f"Bank list API failed, falling back to local: {str(e)}")
+        result = fintech_service.get_bank_list()
+        return {
+            "status": "success",
+            "message": "Bank list retrieved successfully (local)",
             "data": BankListResponse(**result)
         }
     except Exception as e:

@@ -93,6 +93,22 @@ class BankTransferResponse(BaseModel):
     recipientBank: str
 
 
+# ============= Other Bank enquiry =============
+class OtherBankEnquiryRequest(BaseModel):
+    """Schema for other bank account enquiry."""
+    accountNumber: str
+    bankCode: str
+
+
+class ExternalTransferRequest(BaseModel):
+    """Schema for external bank transfer from mobile."""
+    amount: float
+    recipientAccountNumber: str
+    recipientName: str
+    recipientBankCode: str
+    narration: str
+
+
 # ============= Wallet Transfer (P2P) =============
 class WalletTransferRequest(BaseModel):
     """Schema for wallet-to-wallet transfer request."""

@@ -364,6 +364,202 @@ class WalletAPIClient:
             logger.error(f"Unexpected error during get wallet by BVN: {str(e)}")
             raise WalletAPIError(f"Get wallet by BVN error: {str(e)}")
 
+    async def get_banks(self) -> Dict[str, Any]:
+        """
+        Fetch list of all Banks.
+        
+        Returns:
+            Dict containing list of banks
+            
+        Raises:
+            WalletAPIError: If bank list query fails
+        """
+        headers = await self._get_auth_headers()
+        logger.info("Fetching list of banks")
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.base_url}/get_banks",
+                    headers=headers
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Get banks failed: {response.status_code} - {error_detail}")
+                    raise WalletAPIError(f"Get banks failed: {error_detail}")
+                
+                data = response.json()
+                logger.info("Banks list retrieved")
+                return data
+                
+        except httpx.RequestError as e:
+            logger.error(f"Network error during get banks: {str(e)}")
+            raise WalletAPIError(f"Network error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during get banks: {str(e)}")
+            raise WalletAPIError(f"Get banks error: {str(e)}")
+
+    async def account_enquiry(self, enquiry_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Verify Account Details of other bank's account.
+        
+        Args:
+            enquiry_data: Dictionary containing customer account information
+            
+        Returns:
+            Dict containing account enquiry response
+            
+        Raises:
+            WalletAPIError: If account enquiry fails
+        """
+        headers = await self._get_auth_headers()
+        logger.info(f"Performing account enquiry")
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/other_banks_enquiry",
+                    json=enquiry_data,
+                    headers=headers
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Account enquiry failed: {response.status_code} - {error_detail}")
+                    raise WalletAPIError(f"Account enquiry failed: {error_detail}")
+                
+                data = response.json()
+                logger.info("Account enquiry successful")
+                return data
+                
+        except httpx.RequestError as e:
+            logger.error(f"Network error during account enquiry: {str(e)}")
+            raise WalletAPIError(f"Network error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during account enquiry: {str(e)}")
+            raise WalletAPIError(f"Account enquiry error: {str(e)}")
+
+    async def transfer_other_banks(self, transfer_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Transfer from customer wallet to other bank.
+        
+        Args:
+            transfer_data: Transfer payload containing transaction, order, customer, etc.
+            
+        Returns:
+            Dict containing transfer response
+            
+        Raises:
+            WalletAPIError: If transfer fails
+        """
+        headers = await self._get_auth_headers()
+        logger.info("Processing transfer to other bank")
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/wallet_other_banks",
+                    json=transfer_data,
+                    headers=headers
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Other bank transfer failed: {response.status_code} - {error_detail}")
+                    raise WalletAPIError(f"Other bank transfer failed: {error_detail}")
+                
+                data = response.json()
+                logger.info("Other bank transfer request successful")
+                return data
+                
+        except httpx.RequestError as e:
+            logger.error(f"Network error during other bank transfer: {str(e)}")
+            raise WalletAPIError(f"Network error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during other bank transfer: {str(e)}")
+            raise WalletAPIError(f"Other bank transfer error: {str(e)}")
+
+    async def get_transaction_history(self, history_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Fetch a customer's transaction history.
+        
+        Args:
+            history_data: Dictionary containing accountNumber, fromDate, toDate, numberOfItems
+            
+        Returns:
+            Dict containing transaction history
+            
+        Raises:
+            WalletAPIError: If transaction history lookup fails
+        """
+        headers = await self._get_auth_headers()
+        logger.info(f"Fetching transaction history for account: {history_data.get('accountNumber')}")
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/wallet_transactions",
+                    json=history_data,
+                    headers=headers
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Transaction history failed: {response.status_code} - {error_detail}")
+                    raise WalletAPIError(f"Transaction history failed: {error_detail}")
+                
+                data = response.json()
+                logger.info("Transaction history retrieved")
+                return data
+                
+        except httpx.RequestError as e:
+            logger.error(f"Network error during transaction history: {str(e)}")
+            raise WalletAPIError(f"Network error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during transaction history: {str(e)}")
+            raise WalletAPIError(f"Transaction history error: {str(e)}")
+
+    async def get_wallet_balance(self, account_no: str) -> Dict[str, Any]:
+        """
+        Fetch details of a customer's wallet including balance.
+        
+        Args:
+            account_no: Wallet account number
+            
+        Returns:
+            Dict containing wallet details
+            
+        Raises:
+            WalletAPIError: If wallet enquiry fails
+        """
+        headers = await self._get_auth_headers()
+        logger.info(f"Enquiring wallet details for: {account_no}")
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/wallet_enquiry",
+                    json={"accountNo": account_no},
+                    headers=headers
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Wallet enquiry failed: {response.status_code} - {error_detail}")
+                    raise WalletAPIError(f"Wallet enquiry failed: {error_detail}")
+                
+                data = response.json()
+                logger.info("Wallet enquiry successful")
+                return data
+                
+        except httpx.RequestError as e:
+            logger.error(f"Network error during wallet enquiry: {str(e)}")
+            raise WalletAPIError(f"Network error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during wallet enquiry: {str(e)}")
+            raise WalletAPIError(f"Wallet enquiry error: {str(e)}")
+
 
 
 # Global client instance

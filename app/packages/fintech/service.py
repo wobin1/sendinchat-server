@@ -1005,3 +1005,117 @@ async def complete_transfer_from_hold(
         "senderNewLockedBalance": sender_wallet['locked_balance'],
         "receiverNewBalance": receiver_wallet['balance']
     }
+
+
+async def get_banks_api() -> List[Dict[str, Any]]:
+    """Fetch list of all banks from third-party API."""
+    try:
+        result = await wallet_api_client.get_banks()
+        return result.get("data", [])
+    except Exception as e:
+        logger.error(f"Error fetching banks: {str(e)}")
+        raise ValueError(f"Failed to fetch banks: {str(e)}")
+
+
+async def account_enquiry_other_bank(account_no: str, bank_code: str) -> Dict[str, Any]:
+    """Verify details of an account in another bank."""
+    enquiry_data = {
+        "customer": {
+            "accountNumber": account_no,
+            "bankCode": bank_code
+        }
+    }
+    try:
+        result = await wallet_api_client.account_enquiry(enquiry_data)
+        return result.get("data", {})
+    except Exception as e:
+        logger.error(f"Error in account enquiry: {str(e)}")
+        raise ValueError(f"Account enquiry failed: {str(e)}")
+
+
+async def transfer_to_other_bank(
+    sender_account_no: str,
+    amount: float,
+    recipient_account_no: str,
+    recipient_name: str,
+    recipient_bank_code: str,
+    narration: str
+) -> Dict[str, Any]:
+    """Transfer funds from wallet to another bank."""
+    transaction_id = generate_transaction_id()
+    transfer_data = {
+        "transaction": {
+            "transactionId": transaction_id,
+            "reference": generate_reference()
+        },
+        "order": {
+            "amount": str(amount),
+            "narration": narration
+        },
+        "customer": {
+            "accountNumber": recipient_account_no,
+            "accountName": recipient_name,
+            "bankCode": recipient_bank_code
+        },
+        "merchant": {
+            "merchantFirstName": "SendChat",
+            "merchantLastName": "Pay"
+        },
+        "transactionType": "OTHER_BANKS",
+        "narration": narration
+    }
+    try:
+        result = await wallet_api_client.transfer_other_banks(transfer_data)
+        # Log locally as well
+        db = JsonDatabase.read()
+        db['transactions'].append({
+            "id": transaction_id,
+            "type": "external_transfer",
+            "accountNo": sender_account_no,
+            "amount": -amount,
+            "recipientAccount": recipient_account_no,
+            "recipientBank": recipient_bank_code,
+            "status": "completed",
+            "createdAt": datetime.utcnow().isoformat() + "Z"
+        })
+        JsonDatabase.write(db)
+        return result
+    except Exception as e:
+        logger.error(f"Error in other bank transfer: {str(e)}")
+        raise ValueError(f"Transfer to other bank failed: {str(e)}")
+
+
+async def get_transactions_history_api(
+    account_number: str,
+    from_date: str = None,
+    to_date: str = None,
+    number_of_items: int = 20
+) -> List[Dict[str, Any]]:
+    """Fetch transaction history from third-party API."""
+    if not from_date:
+        from_date = (datetime.utcnow() - timedelta(days=30)).strftime('%d/%m/%Y')
+    if not to_date:
+        to_date = datetime.utcnow().strftime('%d/%m/%Y')
+        
+    history_data = {
+        "accountNumber": account_number,
+        "fromDate": from_date,
+        "toDate": to_date,
+        "numberOfItems": str(number_of_items)
+    }
+    try:
+        result = await wallet_api_client.get_transaction_history(history_data)
+        return result.get("data", [])
+    except Exception as e:
+        logger.error(f"Error fetching transaction history: {str(e)}")
+        raise ValueError(f"Failed to fetch transaction history: {str(e)}")
+
+
+async def get_wallet_balance_api(account_no: str) -> Dict[str, Any]:
+    """Get wallet details and balance from third-party API."""
+    try:
+        result = await wallet_api_client.get_wallet_balance(account_no)
+        return result.get("data", {})
+    except Exception as e:
+        logger.error(f"Error in wallet enquiry: {str(e)}")
+        raise ValueError(f"Wallet enquiry failed: {str(e)}")
