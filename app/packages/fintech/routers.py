@@ -371,24 +371,43 @@ async def wallet_transactions(request: WalletTransactionsRequest):
             number_of_items=int(request.numberOfItems)
         )
         
+        logger.info(f"Service returned {len(result) if isinstance(result, list) else 'non-list'} items for {request.accountNumber}")
+
         # Ensure result is a list before iterating
         if not isinstance(result, list):
             logger.warning(f"Expected list for transactions, got {type(result)}: {result}")
             result = []
 
+        def parse_amount(val):
+            # ... (rest of helper)
+            if val is None: return 0.0
+            if isinstance(val, (int, float)): return float(val)
+            if isinstance(val, str):
+                clean_val = "".join(c for c in val if c.isdigit() or c == ".")
+                try: return float(clean_val)
+                except ValueError: return 0.0
+            return 0.0
+
         # Transform API transactions to TransactionItem format
         txns = []
         for t in result:
+            # Derive type and otherParty if possible
+            is_credit = bool(t.get("credit"))
+            is_debit = bool(t.get("debit"))
+            txn_type = "CREDIT" if is_credit else "DEBIT" if is_debit else t.get("postingType", "TRANSFER")
+
             txns.append(TransactionItem(
-                id=str(t.get("id", "")),
-                type=t.get("transactionType", "TRANSFER"),
-                amount=float(t.get("amount", 0.0)),
+                id=str(t.get("uniqueIdentifier", t.get("id", ""))),
+                type=txn_type,
+                amount=parse_amount(t.get("amount")),
                 narration=t.get("narration", ""),
-                reference=t.get("reference", ""),
+                reference=t.get("referenceID", t.get("reference", "")),
                 status=t.get("status", "completed"),
                 createdAt=t.get("transactionDate", ""),
                 otherParty=t.get("otherParty")
             ))
+            
+        logger.info(f"Mapped {len(txns)} transactions for {request.accountNumber}")
             
         return {
             "status": "success",
@@ -399,13 +418,14 @@ async def wallet_transactions(request: WalletTransactionsRequest):
                 totalCount=len(txns)
             )
         }
+
     except ValueError as e:
         # Fallback to local
         try:
             result = fintech_service.get_wallet_transactions(
                 account_number=request.accountNumber,
                 from_date=request.fromDate,
-                toDate=request.toDate,
+                to_date=request.toDate,
                 number_of_items=request.numberOfItems
             )
             return {

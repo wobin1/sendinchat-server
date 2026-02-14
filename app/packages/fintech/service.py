@@ -1103,10 +1103,23 @@ async def get_transactions_history_api(
         "toDate": to_date,
         "numberOfItems": str(number_of_items)
     }
+    logger.info(f"Fetching transaction history with payload: {history_data}")
     try:
         result = await wallet_api_client.get_transaction_history(history_data)
-        data = result.get("data", [])
-        return data if isinstance(data, list) else []
+        logger.info(f"Raw transaction history response: {result}")
+        
+        # Robust dictionary access
+        if not isinstance(result, dict):
+            logger.warning(f"Unexpected response type from API: {type(result)}")
+            return []
+            
+        # Transactions are inside result["data"]["message"]
+        data = result.get("data", {})
+        if isinstance(data, dict):
+            txns = data.get("message", [])
+        else:
+            txns = []
+        return txns if isinstance(txns, list) else []
     except Exception as e:
         logger.error(f"Error fetching transaction history: {str(e)}")
         raise ValueError(f"Failed to fetch transaction history: {str(e)}")
