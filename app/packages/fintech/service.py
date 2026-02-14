@@ -1105,7 +1105,8 @@ async def get_transactions_history_api(
     }
     try:
         result = await wallet_api_client.get_transaction_history(history_data)
-        return result.get("data", [])
+        data = result.get("data", [])
+        return data if isinstance(data, list) else []
     except Exception as e:
         logger.error(f"Error fetching transaction history: {str(e)}")
         raise ValueError(f"Failed to fetch transaction history: {str(e)}")

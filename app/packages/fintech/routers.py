@@ -370,6 +370,12 @@ async def wallet_transactions(request: WalletTransactionsRequest):
             to_date=request.toDate,
             number_of_items=int(request.numberOfItems)
         )
+        
+        # Ensure result is a list before iterating
+        if not isinstance(result, list):
+            logger.warning(f"Expected list for transactions, got {type(result)}: {result}")
+            result = []
+
         # Transform API transactions to TransactionItem format
         txns = []
         for t in result:
