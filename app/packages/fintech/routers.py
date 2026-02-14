@@ -34,6 +34,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/fintech", tags=["fintech"])
 
 
+def parse_amount(val):
+    """Robustly parse amount strings with commas and other formatting."""
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        # Remove commas and other non-numeric chars except dot
+        clean_val = "".join(c for c in val if c.isdigit() or c == ".")
+        try:
+            return float(clean_val)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 # ============= 1. Create Wallet =============
 @router.post("/wallet/create", response_model=StandardWalletResponse, status_code=status.HTTP_201_CREATED)
 async def create_wallet(request: CreateWalletRequest):
@@ -315,10 +331,10 @@ async def wallet_enquiry(request: WalletEnquiryRequest):
             "status": "success",
             "message": "Wallet enquiry successful",
             "data": WalletEnquiryResponse(
-                accountNo=result.get("accountNumber", request.accountNo),
-                accountName=result.get("accountName", "Unknown"),
-                balance=float(result.get("balance", 0.0)),
-                phoneNo=result.get("phoneNumber", ""),
+                accountNo=result.get("nuban", result.get("accountNumber", request.accountNo)),
+                accountName=result.get("name", result.get("accountName", "Unknown")),
+                balance=parse_amount(result.get("availableBalance", result.get("balance"))),
+                phoneNo=result.get("phoneNo", result.get("phoneNumber", "")),
                 email=result.get("email", "")
             )
         }
@@ -371,22 +387,10 @@ async def wallet_transactions(request: WalletTransactionsRequest):
             number_of_items=int(request.numberOfItems)
         )
         
-        logger.info(f"Service returned {len(result) if isinstance(result, list) else 'non-list'} items for {request.accountNumber}")
-
         # Ensure result is a list before iterating
         if not isinstance(result, list):
             logger.warning(f"Expected list for transactions, got {type(result)}: {result}")
             result = []
-
-        def parse_amount(val):
-            # ... (rest of helper)
-            if val is None: return 0.0
-            if isinstance(val, (int, float)): return float(val)
-            if isinstance(val, str):
-                clean_val = "".join(c for c in val if c.isdigit() or c == ".")
-                try: return float(clean_val)
-                except ValueError: return 0.0
-            return 0.0
 
         # Transform API transactions to TransactionItem format
         txns = []
@@ -406,8 +410,6 @@ async def wallet_transactions(request: WalletTransactionsRequest):
                 createdAt=t.get("transactionDate", ""),
                 otherParty=t.get("otherParty")
             ))
-            
-        logger.info(f"Mapped {len(txns)} transactions for {request.accountNumber}")
             
         return {
             "status": "success",

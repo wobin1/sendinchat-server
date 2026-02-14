@@ -1103,10 +1103,8 @@ async def get_transactions_history_api(
         "toDate": to_date,
         "numberOfItems": str(number_of_items)
     }
-    logger.info(f"Fetching transaction history with payload: {history_data}")
     try:
         result = await wallet_api_client.get_transaction_history(history_data)
-        logger.info(f"Raw transaction history response: {result}")
         
         # Robust dictionary access
         if not isinstance(result, dict):
@@ -1129,7 +1127,9 @@ async def get_wallet_balance_api(account_no: str) -> Dict[str, Any]:
     """Get wallet details and balance from third-party API."""
     try:
         result = await wallet_api_client.get_wallet_balance(account_no)
-        return result.get("data", {})
+        if isinstance(result, dict):
+            return result.get("data", {})
+        return {}
     except Exception as e:
-        logger.error(f"Error in wallet enquiry: {str(e)}")
+        logger.error(f"Error in wallet enquiry for {account_no}: {str(e)}")
         raise ValueError(f"Wallet enquiry failed: {str(e)}")
