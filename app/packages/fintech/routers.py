@@ -13,7 +13,7 @@ from app.packages.fintech.schemas import (
     WalletUpgradeRequest, WalletUpgradeResponse,
     UpgradeStatusResponse, GetWalletByBVNResponse,
     InflowWebhookPayload, UpgradeStatusWebhookPayload, WebhookResponse,
-    BankListResponse,
+    BankListResponse, BankInfo,
     ClientAuthRequest, ClientAuthResponse,
     StandardWalletResponse, StandardBankTransferResponse,
     StandardWalletTransferResponse, StandardWalletEnquiryResponse,
@@ -21,7 +21,7 @@ from app.packages.fintech.schemas import (
     StandardClientAuthResponse, StandardWalletUpgradeResponse,
     StandardUpgradeStatusResponse, StandardGetWalletByBVNResponse,
     StandardWebhookResponse,
-    OtherBankEnquiryRequest, ExternalTransferRequest
+    OtherBankEnquiryRequest, ExternalTransferRequest, TransactionItem
 )
 from app.packages.fintech import service as fintech_service
 from app.users.routers import get_current_user
