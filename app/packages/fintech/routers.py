@@ -460,6 +460,62 @@ async def wallet_transactions(request: WalletTransactionsRequest):
         )
 
 
+# ============= 6.5 Pending Transactions =============
+@router.get("/transactions/pending", response_model=StandardWalletTransactionsResponse)
+async def get_pending_transactions(
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """
+    Get all pending transactions for the current user.
+    
+    These are usually chat-initiated transfers waiting for the receiver to accept.
+    """
+    try:
+        records = await conn.fetch(
+            """
+            SELECT t.id, t.sender_id, u.username as sender_username, t.amount, t.status, t.created_at, m.id as message_id
+            FROM transactions t
+            JOIN users u ON t.sender_id = u.id
+            LEFT JOIN messages m ON t.id::text = m.transaction_id
+            WHERE t.receiver_id = $1 AND t.status = 'pending'
+            ORDER BY t.created_at DESC
+            """,
+            current_user.id
+        )
+        
+        txns = []
+        for r in records:
+            txns.append(TransactionItem(
+                id=str(r['id']),
+                type="transfer",
+                amount=float(r['amount']),
+                narration=f"Transfer from {r['sender_username']}",
+                reference=f"PEND-{r['id']}",
+                status=r['status'],
+                createdAt=r['created_at'].isoformat(),
+                otherParty=r['sender_username'],
+                # Add extra fields that might be useful
+                message_id=r['message_id']
+            ))
+            
+        return {
+            "status": "success",
+            "message": "Pending transactions retrieved successfully",
+            "data": WalletTransactionsResponse(
+                accountNumber=current_user.wallet_account or "N/A",
+                transactions=txns,
+                totalCount=len(txns)
+            )
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch pending transactions: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Failed to fetch pending transactions", "data": None}
+        )
+
+
 # ============= 7. Get Bank List =============
 @router.get("/banks", response_model=StandardBankListResponse, status_code=status.HTTP_200_OK)
 async def get_banks():

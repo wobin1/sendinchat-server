@@ -189,6 +189,7 @@ class TransactionItem(BaseModel):
     status: str
     createdAt: str
     otherParty: Optional[str] = None
+    message_id: Optional[int] = None
 
 
 class WalletTransactionsResponse(BaseModel):
