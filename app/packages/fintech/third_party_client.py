@@ -331,10 +331,10 @@ class WalletAPIClient:
             bvn: Bank Verification Number
             
         Returns:
-            Dict containing wallet information
+            Dict containing wallet information, or None if wallet not found
             
         Raises:
-            WalletAPIError: If wallet lookup fails
+            WalletAPIError: If wallet lookup fails (excluding "not found" cases)
         """
         headers = await self._get_auth_headers()
         
@@ -348,18 +348,25 @@ class WalletAPIClient:
                     headers=headers
                 )
                 
-                if response.status_code != 200:
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info(f"Wallet retrieved by BVN")
+                    return data
+                elif response.status_code == 400:
+                    # Wallet not found - this is expected for new users
+                    error_detail = response.text
+                    logger.info(f"No wallet found for BVN: {error_detail}")
+                    return None
+                else:
                     error_detail = response.text
                     logger.error(f"Get wallet by BVN failed: {response.status_code} - {error_detail}")
-                    raise WalletAPIError(f"Get wallet by BVN failed: {error_detail}")
-                
-                data = response.json()
-                logger.info(f"Wallet retrieved by BVN")
-                return data
+                    raise WalletAPIError(f"Get wallet by BVN failed: {error_detail}", status_code=response.status_code, response_text=error_detail)
                 
         except httpx.RequestError as e:
             logger.error(f"Network error during get wallet by BVN: {str(e)}")
             raise WalletAPIError(f"Network error: {str(e)}")
+        except WalletAPIError:
+            raise
         except Exception as e:
             logger.error(f"Unexpected error during get wallet by BVN: {str(e)}")
             raise WalletAPIError(f"Get wallet by BVN error: {str(e)}")

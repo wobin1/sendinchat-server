@@ -100,8 +100,40 @@ async def onboard_wallet(
 ):
     """
     Create a new wallet and link it to the current user.
+    If user already has a wallet, returns the existing wallet details.
     """
     try:
+        # Check if user already has a wallet account
+        if current_user.wallet_account:
+            logger.info(f"User {current_user.username} already has wallet: {current_user.wallet_account}")
+            
+            # Fetch wallet details from third-party API
+            try:
+                wallet_details = await fintech_service.wallet_enquiry(current_user.wallet_account)
+                return {
+                    "status": "success",
+                    "message": "Wallet already exists",
+                    "data": WalletResponse(
+                        accountNo=current_user.wallet_account,
+                        accountName=wallet_details.get("accountName", current_user.username),
+                        bvn=request.bvn,
+                        balance=wallet_details.get("balance", 0.0)
+                    )
+                }
+            except Exception as e:
+                logger.warning(f"Failed to fetch existing wallet details: {str(e)}")
+                # Return basic info even if enquiry fails
+                return {
+                    "status": "success",
+                    "message": "Wallet already exists",
+                    "data": WalletResponse(
+                        accountNo=current_user.wallet_account,
+                        accountName=current_user.username,
+                        bvn=request.bvn,
+                        balance=0.0
+                    )
+                }
+        
         # 1. Create the wallet via fintech service
         result = await fintech_service.create_wallet(
             bvn=request.bvn,
@@ -279,6 +311,7 @@ async def transfer_wallet(request: WalletTransferRequest):
     
     This endpoint debits the sender's account and credits the receiver's account.
     """
+    logger.info(f"Transfer request: {request.senderAccountNo} -> {request.receiverAccountNo}, amount: {request.amount}")
     try:
         result = await fintech_service.transfer_funds(
             sender_account_no=request.senderAccountNo,
@@ -290,18 +323,24 @@ async def transfer_wallet(request: WalletTransferRequest):
             merchant_fee_amount=request.merchant.merchantFeeAmount,
             is_fee=request.merchant.isFee
         )
+        logger.info(f"Transfer successful: {request.transactionId}")
         return {
             "status": "success",
             "message": "Transfer successful",
             "data": WalletTransferResponse(message="Transfer successful", **result)
         }
     except ValueError as e:
+        logger.error(f"Transfer validation error: {str(e)}")
+        logger.error(f"Request details: sender={request.senderAccountNo}, receiver={request.receiverAccountNo}, amount={request.amount}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": str(e), "data": None}
         )
     except Exception as e:
         logger.error(f"Transfer failed: {str(e)}")
+        logger.error(f"Request details: sender={request.senderAccountNo}, receiver={request.receiverAccountNo}, amount={request.amount}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error traceback:", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"status": "error", "message": "Transfer failed", "data": None}
