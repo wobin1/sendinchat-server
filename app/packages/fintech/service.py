@@ -680,6 +680,7 @@ async def credit_wallet(
     try:
         # Call third-party API
         result = await wallet_api_client.credit_transfer(transfer_data)
+        logger.info(f"!!! THIRD-PARTY CREDIT RESPONSE !!! for {account_no}: {json.dumps(result, indent=2)}")
         
         # Log transaction in local database
         db = JsonDatabase.read()
@@ -700,11 +701,15 @@ async def credit_wallet(
         
         logger.info(f"Wallet credited via third-party API: {account_no} with {total_amount}")
         
+        # Robust balance extraction
+        data = result.get("data", {}) if isinstance(result, dict) else {}
+        new_balance = data.get("balance", data.get("availableBalance", result.get("balance", 0.0)))
+        
         return {
             "transactionId": transaction_id,
             "accountNo": account_no,
             "amount": total_amount,
-            "newBalance": result.get("balance", 0.0)
+            "newBalance": float(new_balance)
         }
     except WalletAPIError as e:
         logger.error(f"Third-party API error during credit transfer: {str(e)}")
@@ -749,6 +754,7 @@ async def debit_wallet(
     try:
         # Call third-party API
         result = await wallet_api_client.debit_transfer(transfer_data)
+        logger.info(f"!!! THIRD-PARTY DEBIT RESPONSE !!! for {account_no}: {json.dumps(result, indent=2)}")
         
         # Log transaction in local database
         db = JsonDatabase.read()
@@ -769,11 +775,15 @@ async def debit_wallet(
         
         logger.info(f"Wallet debited via third-party API: {account_no} with {total_amount}")
         
+        # Robust balance extraction
+        data = result.get("data", {}) if isinstance(result, dict) else {}
+        new_balance = data.get("balance", data.get("availableBalance", result.get("balance", 0.0)))
+
         return {
             "transactionId": transaction_id,
             "accountNo": account_no,
             "amount": total_amount,
-            "newBalance": result.get("balance", 0.0)
+            "newBalance": float(new_balance)
         }
     except WalletAPIError as e:
         logger.error(f"Third-party API error during debit transfer: {str(e)}")
@@ -1174,7 +1184,10 @@ async def transfer_to_other_bank(
         "narration": narration
     }
     try:
+        logger.info(f"!!! SENDING EXTERNAL TRANSFER PAYLOAD !!!: {json.dumps(transfer_data, indent=2)}")
         result = await wallet_api_client.transfer_other_banks(transfer_data)
+        logger.info(f"!!! THIRD-PARTY EXTERNAL TRANSFER RESPONSE !!!: {json.dumps(result, indent=2)}")
+        
         # Log locally as well
         db = JsonDatabase.read()
         db['transactions'].append({
@@ -1185,7 +1198,8 @@ async def transfer_to_other_bank(
             "recipientAccount": recipient_account_no,
             "recipientBank": recipient_bank_code,
             "status": "completed",
-            "createdAt": datetime.utcnow().isoformat() + "Z"
+            "createdAt": datetime.utcnow().isoformat() + "Z",
+            "thirdPartyResponse": result
         })
         JsonDatabase.write(db)
         return result
@@ -1236,6 +1250,7 @@ async def get_wallet_balance_api(account_no: str) -> Dict[str, Any]:
     """Get wallet details and balance from third-party API."""
     try:
         result = await wallet_api_client.get_wallet_balance(account_no)
+        logger.info(f"!!! THIRD-PARTY BALANCE RESPONSE !!! for {account_no}: {json.dumps(result, indent=2)}")
         if isinstance(result, dict):
             return result.get("data", {})
         return {}
