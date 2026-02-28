@@ -78,7 +78,7 @@ class BankTransferRequest(BaseModel):
     narration: str
     order: Order
     transaction: TransactionDetails
-    merchant: Merchant
+    merchant: Optional[Merchant] = None
     code: Optional[str] = None
     message: Optional[str] = None
 

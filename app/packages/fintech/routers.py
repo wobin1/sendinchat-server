@@ -195,9 +195,9 @@ async def bank_transfer(request: BankTransferRequest):
             narration=request.narration,
             reference=request.transaction.reference,
             session_id=request.transaction.sessionId,
-            merchant_fee_account=request.merchant.merchantFeeAccount,
-            merchant_fee_amount=request.merchant.merchantFeeAmount,
-            is_fee=request.merchant.isFee
+            merchant_fee_account=request.merchant.merchantFeeAccount if request.merchant else "",
+            merchant_fee_amount=request.merchant.merchantFeeAmount if request.merchant else "0",
+            is_fee=request.merchant.isFee if request.merchant else "false"
         )
         return {
             "status": "success",
@@ -319,9 +319,9 @@ async def transfer_wallet(request: WalletTransferRequest):
             amount=request.amount,
             narration=request.narration,
             transaction_id=request.transactionId,
-            merchant_fee_account=request.merchant.merchantFeeAccount,
-            merchant_fee_amount=request.merchant.merchantFeeAmount,
-            is_fee=request.merchant.isFee
+            merchant_fee_account=request.merchant.merchantFeeAccount if request.merchant else "",
+            merchant_fee_amount=request.merchant.merchantFeeAmount if request.merchant else "0",
+            is_fee=request.merchant.isFee if request.merchant else "false"
         )
         logger.info(f"Transfer successful: {request.transactionId}")
         return {
