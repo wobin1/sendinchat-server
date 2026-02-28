@@ -653,7 +653,7 @@ async def credit_wallet(
     transaction_id: str,
     merchant_fee_account: str,
     merchant_fee_amount: str,
-    is_fee: str,
+    is_fee: bool,
     transaction_type: str
 ) -> Dict[str, Any]:
     """
@@ -674,7 +674,6 @@ async def credit_wallet(
             "merchantFeeAccount": merchant_fee_account,
             "merchantFeeAmount": merchant_fee_amount
         },
-        "transactionType": transaction_type
     }
     
     try:
@@ -691,7 +690,6 @@ async def credit_wallet(
             "amount": total_amount,
             "narration": narration,
             "reference": transaction_id,
-            "transactionType": transaction_type,
             "status": "completed",
             "createdAt": datetime.utcnow().isoformat() + "Z",
             "thirdPartyResponse": result
@@ -727,7 +725,7 @@ async def debit_wallet(
     transaction_id: str,
     merchant_fee_account: str,
     merchant_fee_amount: str,
-    is_fee: str,
+    is_fee: bool,
     transaction_type: str
 ) -> Dict[str, Any]:
     """
@@ -748,7 +746,6 @@ async def debit_wallet(
             "merchantFeeAccount": merchant_fee_account,
             "merchantFeeAmount": merchant_fee_amount
         },
-        "transactionType": transaction_type
     }
     
     try:
@@ -765,7 +762,6 @@ async def debit_wallet(
             "amount": -total_amount,
             "narration": narration,
             "reference": transaction_id,
-            "transactionType": transaction_type,
             "status": "completed",
             "createdAt": datetime.utcnow().isoformat() + "Z",
             "thirdPartyResponse": result
@@ -802,7 +798,7 @@ async def transfer_funds(
     transaction_id: str,
     merchant_fee_account: str,
     merchant_fee_amount: str,
-    is_fee: str
+    is_fee: bool
 ) -> Dict[str, Any]:
     """
     Transfer funds from sender wallet to receiver wallet.

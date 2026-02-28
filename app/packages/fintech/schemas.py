@@ -67,7 +67,7 @@ class TransactionDetails(BaseModel):
 
 class Merchant(BaseModel):
     """Merchant fee details."""
-    isFee: str  # Changed to str to match third-party API ("true" or "false")
+    isFee: bool  # Changed to bool as per 9PSB V3 documentation (Section 5)
     merchantFeeAccount: str
     merchantFeeAmount: str
 
