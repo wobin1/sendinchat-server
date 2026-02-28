@@ -117,7 +117,7 @@ class WalletTransferRequest(BaseModel):
     amount: float = Field(..., gt=0, description="Transfer amount")
     narration: str = Field(..., description="Transfer description")
     transactionId: str = Field(..., description="Unique transaction reference")
-    merchant: Merchant
+    merchant: Optional[Merchant] = None
 
 
 class WalletTransferResponse(BaseModel):
@@ -139,8 +139,8 @@ class WalletOperationRequest(BaseModel):
     narration: str
     totalAmount: float = Field(..., gt=0)
     transactionId: str
-    merchant: Merchant
-    transactionType: str
+    merchant: Optional[Merchant] = None
+    transactionType: Optional[str] = None
 
 
 class WalletOperationResponse(BaseModel):
