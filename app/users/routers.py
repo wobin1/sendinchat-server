@@ -164,11 +164,14 @@ async def search_users(
         {
             "id": u.id,
             "username": u.username,
+            "wallet_account": u.wallet_account,
             "created_at": u.created_at.isoformat(),
             "is_active": u.is_active
         }
         for u in users
     ]
+    
+    logger.info(f"Search results for query '{q}': {users_data}")
     
     return {
         "status": "success",
