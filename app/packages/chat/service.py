@@ -385,14 +385,28 @@ async def get_user_chats(
                        LIMIT 1
                    )
                    ELSE NULL
-               END as other_user_username
+               END as other_user_username,
+               -- Get last message content
+               (
+                   SELECT content FROM messages 
+                   WHERE chat_id = c.id 
+                   ORDER BY created_at DESC 
+                   LIMIT 1
+               ) as last_message,
+               -- Get last message time
+               (
+                   SELECT created_at FROM messages 
+                   WHERE chat_id = c.id 
+                   ORDER BY created_at DESC 
+                   LIMIT 1
+               ) as last_message_time
         FROM chats c
         JOIN chat_members cm ON c.id = cm.chat_id
         WHERE c.id IN (
             SELECT chat_id FROM chat_members WHERE user_id = $1
         )
         GROUP BY c.id, c.chat_type, c.name, c.creator_id, c.created_at
-        ORDER BY c.created_at DESC
+        ORDER BY COALESCE((SELECT created_at FROM messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1), c.created_at) DESC
         """,
         user_id
     )

@@ -342,6 +342,11 @@ async def get_my_chats(
     if chat_type:
         chats = [c for c in chats if c['chat_type'] == chat_type]
     
+    # Format dates
+    for chat in chats:
+        if chat.get('last_message_time'):
+            chat['last_message_time'] = chat['last_message_time'].isoformat()
+    
     return {
         "status": "success",
         "message": "Chats retrieved successfully",
