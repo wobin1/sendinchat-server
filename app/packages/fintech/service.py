@@ -812,7 +812,27 @@ async def transfer_funds(
         ValueError: If transfer fails at any step
         WalletAPIError: If third-party API request fails
     """
-    logger.info(f"Processing transfer: {amount} from {sender_account_no} to {receiver_account_no}")
+    logger.info(f"Processing transfer: {amount} from {sender_account_no} to {receiver_account_no} (ID: {transaction_id})")
+    
+    # Step 0: Idempotency Check - Requery to see if this transaction already succeeded
+    try:
+        logger.info(f"Checking idempotency for transaction {transaction_id}...")
+        tsq_result = await wallet_api_client.requery_transaction(f"{transaction_id}-debit")
+        if tsq_result.get("status") == "SUCCESS" or tsq_result.get("responseCode") == "00":
+            logger.info(f"Transaction {transaction_id} already exists and was successful. Returning existing success.")
+            # We don't have the full original result easily, so we return a synthetic success
+            # This is safer than processing again.
+            return {
+                "transactionId": transaction_id,
+                "senderAccountNo": sender_account_no,
+                "receiverAccountNo": receiver_account_no,
+                "amount": amount,
+                "senderNewBalance": 0.0, # Balance might be stale here but it's safe
+                "receiverNewBalance": 0.0,
+                "isDuplicate": True
+            }
+    except Exception as e:
+        logger.info(f"Idempotency check (TSQ) found no prior success for {transaction_id}: {str(e)}")
     
     # Step 1: Debit sender's account
     try:

@@ -3,6 +3,7 @@ Third-party wallet API client.
 Handles authentication and API requests to the external wallet service.
 """
 import httpx
+import json
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -234,6 +235,19 @@ class WalletAPIClient:
                 
         except httpx.RequestError as e:
             logger.error(f"Network error during debit transfer: {str(e)}")
+            # Try to requery if we have a network error to see if it actually went through
+            txn_id = transfer_data.get('transactionId')
+            if txn_id:
+                try:
+                    logger.info(f"Attempting to requery transaction {txn_id} after network error")
+                    requery_result = await self.requery_transaction(txn_id)
+                    # Check if requery shows success
+                    if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
+                        logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
+                        return requery_result
+                except Exception as re:
+                    logger.error(f"Requery failed after network error: {str(re)}")
+            
             raise WalletAPIError(f"Network error during debit transfer: {str(e)}")
         except WalletAPIError:
             raise
@@ -567,6 +581,38 @@ class WalletAPIClient:
             logger.error(f"Unexpected error during wallet enquiry: {str(e)}")
             raise WalletAPIError(f"Wallet enquiry error: {str(e)}")
 
+
+
+    async def requery_transaction(self, transaction_id: str) -> Dict[str, Any]:
+        """
+        Query the status of a transaction via the TSQ endpoint.
+        """
+        headers = await self._get_auth_headers()
+        logger.info(f"Re-querying transaction status for: {transaction_id}")
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/tsq",
+                    json={"transactionReference": transaction_id},
+                    headers=headers
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"TSQ failed: {response.status_code} - {error_detail}")
+                    raise WalletAPIError(f"TSQ failed: {error_detail}")
+                
+                data = response.json()
+                logger.info(f"TSQ response for {transaction_id}: {json.dumps(data)}")
+                return data
+                
+        except httpx.RequestError as e:
+            logger.error(f"Network error during TSQ: {str(e)}")
+            raise WalletAPIError(f"Network error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during TSQ: {str(e)}")
+            raise WalletAPIError(f"TSQ error: {str(e)}")
 
 
 # Global client instance
