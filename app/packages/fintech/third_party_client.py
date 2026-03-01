@@ -192,6 +192,25 @@ class WalletAPIClient:
                 
         except httpx.RequestError as e:
             logger.error(f"Network error during credit transfer: {str(e)}")
+            # Try to requery if we have a network error
+            txn_id = transfer_data.get('transactionId')
+            if txn_id:
+                try:
+                    logger.info(f"Attempting to requery transaction {txn_id} after network error")
+                    requery_result = await self.requery_transaction(
+                        transaction_id=txn_id,
+                        amount=transfer_data.get('totalAmount', 0),
+                        transaction_type='CREDIT',
+                        transaction_date=datetime.now().strftime('%d/%m/%Y'),
+                        account_no=transfer_data.get('accountNo', '')
+                    )
+                    # Check if requery shows success
+                    if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
+                        logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
+                        return requery_result
+                except Exception as re:
+                    logger.error(f"Requery failed after network error: {str(re)}")
+            
             raise WalletAPIError(f"Network error during credit transfer: {str(e)}")
         except WalletAPIError:
             raise
@@ -240,7 +259,13 @@ class WalletAPIClient:
             if txn_id:
                 try:
                     logger.info(f"Attempting to requery transaction {txn_id} after network error")
-                    requery_result = await self.requery_transaction(txn_id)
+                    requery_result = await self.requery_transaction(
+                        transaction_id=txn_id,
+                        amount=transfer_data.get('totalAmount', 0),
+                        transaction_type='DEBIT',
+                        transaction_date=datetime.now().strftime('%d/%m/%Y'),
+                        account_no=transfer_data.get('accountNo', '')
+                    )
                     # Check if requery shows success
                     if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
                         logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
@@ -583,18 +608,33 @@ class WalletAPIClient:
 
 
 
-    async def requery_transaction(self, transaction_id: str) -> Dict[str, Any]:
+    async def requery_transaction(
+        self, 
+        transaction_id: str, 
+        amount: float, 
+        transaction_type: str, 
+        transaction_date: str, 
+        account_no: str
+    ) -> Dict[str, Any]:
         """
-        Query the status of a transaction via the TSQ endpoint.
+        Query the status of a transaction via the wallet_requery endpoint.
         """
         headers = await self._get_auth_headers()
         logger.info(f"Re-querying transaction status for: {transaction_id}")
         
+        payload = {
+            "transactionId": transaction_id,
+            "amount": int(amount), # Doc says Integer, likely handles whole units or cents
+            "transactionType": transaction_type,
+            "transactionDate": transaction_date,
+            "accountNo": account_no
+        }
+        
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    f"{self.base_url}/tsq",
-                    json={"transactionReference": transaction_id},
+                    f"{self.base_url}/wallet_requery",
+                    json=payload,
                     headers=headers
                 )
                 

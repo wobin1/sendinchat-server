@@ -817,7 +817,13 @@ async def transfer_funds(
     # Step 0: Idempotency Check - Requery to see if this transaction already succeeded
     try:
         logger.info(f"Checking idempotency for transaction {transaction_id}...")
-        tsq_result = await wallet_api_client.requery_transaction(f"{transaction_id}-debit")
+        tsq_result = await wallet_api_client.requery_transaction(
+            transaction_id=f"{transaction_id}-debit",
+            amount=amount,
+            transaction_type='DEBIT',
+            transaction_date=datetime.now().strftime('%d/%m/%Y'),
+            account_no=sender_account_no
+        )
         if tsq_result.get("status") == "SUCCESS" or tsq_result.get("responseCode") == "00":
             logger.info(f"Transaction {transaction_id} already exists and was successful. Returning existing success.")
             # We don't have the full original result easily, so we return a synthetic success
