@@ -624,7 +624,7 @@ class WalletAPIClient:
         
         payload = {
             "transactionId": transaction_id,
-            "amount": int(amount), # Doc says Integer, likely handles whole units or cents
+            "amount": int(float(str(amount))), # Doc says Integer, handle string or decimal
             "transactionType": transaction_type,
             "transactionDate": transaction_date,
             "accountNo": account_no
