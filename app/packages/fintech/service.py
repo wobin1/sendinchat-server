@@ -1037,136 +1037,232 @@ def authenticate_client(client_id: str, client_secret: str) -> Dict[str, Any]:
 
 
 # ============= 9. Escrow (Hold) Logic =============
-async def hold_funds(account_no: str, amount: float) -> Dict[str, Any]:
+async def hold_funds(account_no: str, amount: float, conn: asyncpg.Connection = None) -> Dict[str, Any]:
     """
-    Deduct funds from balance and place in locked_balance.
+    Deduct funds from balance and place in locked_balance using PostgreSQL.
     
     Raises:
         ValueError: If account not found or insufficient balance
     """
     logger.info(f"Holding {amount} for account {account_no}")
     
-    # First, sync balance from third-party API
+    # Get database connection
+    if conn is None:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        conn = await pool.acquire()
+        should_release = True
+    else:
+        should_release = False
+    
     try:
-        api_wallet = await wallet_api_client.wallet_enquiry(account_no)
-        actual_balance = float(api_wallet.get('balance', 0.0))
-        logger.info(f"Fetched actual balance from API: {actual_balance} for account {account_no}")
-    except Exception as e:
-        logger.warning(f"Failed to fetch balance from API, using mock DB: {str(e)}")
-        actual_balance = None
-    
-    db = JsonDatabase.read()
-    
-    wallet = next((w for w in db['wallets'] if w['accountNo'] == account_no), None)
-    if not wallet:
-        raise ValueError(f"Account {account_no} not found")
-    
-    # Use API balance if available, otherwise fall back to mock DB
-    if actual_balance is not None:
-        wallet['balance'] = actual_balance
-    
-    current_balance = wallet['balance']
-    locked_balance = wallet.get('locked_balance', 0.0)
-    available_balance = current_balance - locked_balance
-    
-    logger.info(f"Balance check - Total: {current_balance}, Locked: {locked_balance}, Available: {available_balance}, Required: {amount}")
-    
-    if available_balance < amount:
-        raise ValueError(f"Insufficient balance. Available: {available_balance:.2f}, Locked: {locked_balance:.2f}, Required: {amount:.2f}")
-    
-    wallet['balance'] = current_balance - amount
-    wallet['locked_balance'] = locked_balance + amount
-    
-    JsonDatabase.write(db)
-    
-    return {
-        "accountNo": account_no,
-        "amount": amount,
-        "newBalance": wallet['balance'],
-        "lockedBalance": wallet['locked_balance']
-    }
+        # Fetch actual balance from third-party API
+        try:
+            api_wallet = await wallet_api_client.wallet_enquiry(account_no)
+            actual_balance = float(api_wallet.get('balance', 0.0))
+            logger.info(f"Fetched actual balance from API: {actual_balance} for account {account_no}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch balance from API: {str(e)}")
+            actual_balance = None
+        
+        # Get or create wallet balance record
+        wallet_record = await conn.fetchrow(
+            "SELECT balance, locked_balance FROM wallet_balances WHERE wallet_account = $1",
+            account_no
+        )
+        
+        if not wallet_record:
+            if actual_balance is None:
+                raise ValueError(f"Account {account_no} not found in database or API")
+            
+            # Create new wallet balance record
+            logger.info(f"Creating wallet balance record for {account_no} with balance {actual_balance}")
+            await conn.execute(
+                """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                   VALUES ($1, $2, 0.0, NOW())""",
+                account_no, actual_balance
+            )
+            current_balance = actual_balance
+            locked_balance = 0.0
+        else:
+            # Update balance from API if available
+            if actual_balance is not None:
+                await conn.execute(
+                    "UPDATE wallet_balances SET balance = $1, last_synced_at = NOW() WHERE wallet_account = $2",
+                    actual_balance, account_no
+                )
+                current_balance = actual_balance
+            else:
+                current_balance = float(wallet_record['balance'])
+            locked_balance = float(wallet_record['locked_balance'])
+        
+        available_balance = current_balance - locked_balance
+        
+        logger.info(f"Balance check - Total: {current_balance}, Locked: {locked_balance}, Available: {available_balance}, Required: {amount}")
+        
+        if available_balance < amount:
+            raise ValueError(f"Insufficient balance. Available: {available_balance:.2f}, Locked: {locked_balance:.2f}, Required: {amount:.2f}")
+        
+        # Update balances
+        new_balance = current_balance - amount
+        new_locked = locked_balance + amount
+        
+        await conn.execute(
+            """UPDATE wallet_balances 
+               SET balance = $1, locked_balance = $2, last_synced_at = NOW() 
+               WHERE wallet_account = $3""",
+            new_balance, new_locked, account_no
+        )
+        
+        logger.info(f"Held {amount} for {account_no}. New balance: {new_balance}, Locked: {new_locked}")
+        
+        return {
+            "accountNo": account_no,
+            "amount": amount,
+            "newBalance": new_balance,
+            "lockedBalance": new_locked
+        }
+    finally:
+        if should_release:
+            await pool.release(conn)
 
 
-async def release_funds(account_no: str, amount: float) -> Dict[str, Any]:
+async def release_funds(account_no: str, amount: float, conn: asyncpg.Connection = None) -> Dict[str, Any]:
     """
-    Return funds from locked_balance to balance.
+    Return funds from locked_balance to balance using PostgreSQL.
     
     Raises:
         ValueError: If account not found or insufficient locked balance
     """
     logger.info(f"Releasing {amount} for account {account_no}")
-    db = JsonDatabase.read()
     
-    wallet = next((w for w in db['wallets'] if w['accountNo'] == account_no), None)
-    if not wallet:
-        raise ValueError(f"Account {account_no} not found")
+    # Get database connection
+    if conn is None:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        conn = await pool.acquire()
+        should_release = True
+    else:
+        should_release = False
     
-    locked = wallet.get('locked_balance', 0.0)
-    if locked < amount:
-        raise ValueError(f"Insufficient locked balance. Available: {locked}, Required: {amount}")
-    
-    wallet['balance'] += amount
-    wallet['locked_balance'] = locked - amount
-    
-    JsonDatabase.write(db)
-    
-    return {
-        "accountNo": account_no,
-        "amount": amount,
-        "newBalance": wallet['balance'],
-        "lockedBalance": wallet['locked_balance']
-    }
+    try:
+        wallet_record = await conn.fetchrow(
+            "SELECT balance, locked_balance FROM wallet_balances WHERE wallet_account = $1",
+            account_no
+        )
+        
+        if not wallet_record:
+            raise ValueError(f"Account {account_no} not found")
+        
+        balance = float(wallet_record['balance'])
+        locked_balance = float(wallet_record['locked_balance'])
+        
+        if locked_balance < amount:
+            raise ValueError(f"Insufficient locked balance. Locked: {locked_balance}, Required: {amount}")
+        
+        new_balance = balance + amount
+        new_locked = locked_balance - amount
+        
+        await conn.execute(
+            """UPDATE wallet_balances 
+               SET balance = $1, locked_balance = $2, last_synced_at = NOW() 
+               WHERE wallet_account = $3""",
+            new_balance, new_locked, account_no
+        )
+        
+        logger.info(f"Released {amount} for {account_no}. New balance: {new_balance}, Locked: {new_locked}")
+        
+        return {
+            "accountNo": account_no,
+            "amount": amount,
+            "newBalance": new_balance,
+            "lockedBalance": new_locked
+        }
+    finally:
+        if should_release:
+            await pool.release(conn)
 
 
 async def complete_transfer_from_hold(
     sender_account: str,
     receiver_account: str,
     amount: float,
-    narration: str = "Chat transfer completed"
+    narration: str = "Chat transfer completed",
+    conn: asyncpg.Connection = None
 ) -> Dict[str, Any]:
     """
-    Complete a transfer by moving funds from sender's locked_balance to receiver's balance.
+    Complete a transfer by moving funds from sender's locked_balance to receiver's balance using PostgreSQL.
     """
     logger.info(f"Completing transfer for {amount} from {sender_account} to {receiver_account}")
-    db = JsonDatabase.read()
     
-    sender_wallet = next((w for w in db['wallets'] if w['accountNo'] == sender_account), None)
-    receiver_wallet = next((w for w in db['wallets'] if w['accountNo'] == receiver_account), None)
+    # Get database connection
+    if conn is None:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        conn = await pool.acquire()
+        should_release = True
+    else:
+        should_release = False
     
-    if not sender_wallet:
-        raise ValueError(f"Sender account {sender_account} not found")
-    if not receiver_wallet:
-        raise ValueError(f"Receiver account {receiver_account} not found")
+    try:
+        # Get sender wallet balance
+        sender_record = await conn.fetchrow(
+            "SELECT balance, locked_balance FROM wallet_balances WHERE wallet_account = $1",
+            sender_account
+        )
+        if not sender_record:
+            raise ValueError(f"Sender account {sender_account} not found")
         
-    sender_locked = sender_wallet.get('locked_balance', 0.0)
-    if sender_locked < amount:
-        raise ValueError(f"Insufficient locked balance for sender. Available: {sender_locked}, Required: {amount}")
+        sender_locked = float(sender_record['locked_balance'])
+        if sender_locked < amount:
+            raise ValueError(f"Insufficient locked balance for sender. Available: {sender_locked}, Required: {amount}")
         
-    # Process transfer
-    sender_wallet['locked_balance'] = sender_locked - amount
-    receiver_wallet['balance'] += amount
-    
-    # Create transaction record
-    transaction_id = generate_transaction_id()
-    transaction = {
-        "id": transaction_id,
-        "type": "transfer",
-        "senderAccountNo": sender_account,
-        "receiverAccountNo": receiver_account,
-        "amount": amount,
-        "narration": narration,
-        "status": "completed",
-        "createdAt": datetime.utcnow().isoformat() + "Z"
-    }
-    db['transactions'].append(transaction)
-    
-    JsonDatabase.write(db)
-    
-    return {
-        "transactionId": transaction_id,
-        "senderNewLockedBalance": sender_wallet['locked_balance'],
-        "receiverNewBalance": receiver_wallet['balance']
-    }
+        # Get or create receiver wallet balance
+        receiver_record = await conn.fetchrow(
+            "SELECT balance, locked_balance FROM wallet_balances WHERE wallet_account = $1",
+            receiver_account
+        )
+        
+        if not receiver_record:
+            # Create receiver wallet balance record with 0 initial balance
+            logger.info(f"Creating wallet balance record for receiver {receiver_account}")
+            await conn.execute(
+                """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                   VALUES ($1, 0.0, 0.0, NOW())""",
+                receiver_account
+            )
+            receiver_balance = 0.0
+        else:
+            receiver_balance = float(receiver_record['balance'])
+        
+        # Update sender: reduce locked balance
+        new_sender_locked = sender_locked - amount
+        await conn.execute(
+            """UPDATE wallet_balances 
+               SET locked_balance = $1, last_synced_at = NOW() 
+               WHERE wallet_account = $2""",
+            new_sender_locked, sender_account
+        )
+        
+        # Update receiver: increase balance
+        new_receiver_balance = receiver_balance + amount
+        await conn.execute(
+            """UPDATE wallet_balances 
+               SET balance = $1, last_synced_at = NOW() 
+               WHERE wallet_account = $2""",
+            new_receiver_balance, receiver_account
+        )
+        
+        logger.info(f"Transfer completed. Sender locked: {new_sender_locked}, Receiver balance: {new_receiver_balance}")
+        
+        return {
+            "transactionId": generate_transaction_id(),
+            "senderNewLockedBalance": new_sender_locked,
+            "receiverNewBalance": new_receiver_balance
+        }
+    finally:
+        if should_release:
+            await pool.release(conn)
 
 
 async def get_banks_api() -> List[Dict[str, Any]]:

@@ -78,3 +78,16 @@ CREATE TABLE IF NOT EXISTS contacts (
 
 -- Index for contact performance
 CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
+
+-- Wallet balances table: tracks wallet balances and locked funds
+CREATE TABLE IF NOT EXISTS wallet_balances (
+    wallet_account VARCHAR(20) PRIMARY KEY,
+    balance NUMERIC(12, 2) DEFAULT 0.00 NOT NULL,
+    locked_balance NUMERIC(12, 2) DEFAULT 0.00 NOT NULL,
+    last_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_non_negative_balance CHECK (balance >= 0),
+    CONSTRAINT check_non_negative_locked CHECK (locked_balance >= 0)
+);
+
+-- Index for wallet balance lookups
+CREATE INDEX IF NOT EXISTS idx_wallet_balances_account ON wallet_balances(wallet_account);

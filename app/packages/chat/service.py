@@ -109,7 +109,7 @@ async def initiate_transfer_in_chat(
     )
     
     # Hold funds
-    await fintech_service.hold_funds(sender['wallet_account'], amount)
+    await fintech_service.hold_funds(sender['wallet_account'], amount, conn)
     
     # Send system message about transfer
     message = await send_message(
@@ -164,10 +164,10 @@ async def handle_transfer_action(
     amount = float(msg['amount'])
     
     if action == "accept":
-        await fintech_service.complete_transfer_from_hold(sender_wallet, receiver_wallet, amount)
+        await fintech_service.complete_transfer_from_hold(sender_wallet, receiver_wallet, amount, conn=conn)
         new_status = 'completed'
     elif action == "reject":
-        await fintech_service.release_funds(sender_wallet, amount)
+        await fintech_service.release_funds(sender_wallet, amount, conn)
         new_status = 'rejected'
     else:
         raise ValueError("Invalid action")
