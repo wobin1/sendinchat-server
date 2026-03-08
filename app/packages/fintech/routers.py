@@ -792,3 +792,60 @@ async def upgrade_status_webhook(payload: UpgradeStatusWebhookPayload):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"status": "error", "message": "Webhook processing failed", "data": None}
         )
+
+
+# ============= TEST ENDPOINT: Add Test Funds =============
+@router.post("/wallet/add-test-funds", response_model=StandardWalletEnquiryResponse)
+async def add_test_funds(
+    amount: float,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """
+    Add test funds to the current user's wallet (for development/testing only).
+    """
+    if not current_user.wallet_account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "User does not have a wallet account", "data": None}
+        )
+    
+    if amount <= 0 or amount > 100000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "Amount must be between 0 and 100,000", "data": None}
+        )
+    
+    try:
+        # Add funds directly to the mock database
+        from app.packages.fintech.service import JsonDatabase
+        db = JsonDatabase.read()
+        
+        wallet = next((w for w in db['wallets'] if w['accountNo'] == current_user.wallet_account), None)
+        if not wallet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"status": "error", "message": "Wallet not found", "data": None}
+            )
+        
+        wallet['balance'] = wallet.get('balance', 0.0) + amount
+        JsonDatabase.write(db)
+        
+        logger.info(f"Added test funds: {amount} to wallet {current_user.wallet_account}. New balance: {wallet['balance']}")
+        
+        return {
+            "status": "success",
+            "message": f"Successfully added {amount} test funds",
+            "data": {
+                "accountNo": current_user.wallet_account,
+                "accountName": wallet.get('accountName', current_user.username),
+                "balance": wallet['balance'],
+                "tier": "1"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to add test funds: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Failed to add test funds", "data": None}
+        )

@@ -205,6 +205,7 @@ async def create_wallet(
                 is_duplicate = (
                     error_data.get("status") == "DUPLICATE" or
                     error_data.get("status") == "duplicate" or
+                    error_data.get("responseCode") == "96" or
                     (error_data.get("status") == "FAILED" and (
                         "duplicate" in str(error_data.get("message", "")).lower() or
                         "already exists" in str(error_data.get("message", "")).lower()
@@ -1044,17 +1045,37 @@ async def hold_funds(account_no: str, amount: float) -> Dict[str, Any]:
         ValueError: If account not found or insufficient balance
     """
     logger.info(f"Holding {amount} for account {account_no}")
+    
+    # First, sync balance from third-party API
+    try:
+        api_wallet = await wallet_api_client.wallet_enquiry(account_no)
+        actual_balance = float(api_wallet.get('balance', 0.0))
+        logger.info(f"Fetched actual balance from API: {actual_balance} for account {account_no}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch balance from API, using mock DB: {str(e)}")
+        actual_balance = None
+    
     db = JsonDatabase.read()
     
     wallet = next((w for w in db['wallets'] if w['accountNo'] == account_no), None)
     if not wallet:
         raise ValueError(f"Account {account_no} not found")
     
-    if wallet['balance'] < amount:
-        raise ValueError(f"Insufficient balance. Available: {wallet['balance']}, Required: {amount}")
+    # Use API balance if available, otherwise fall back to mock DB
+    if actual_balance is not None:
+        wallet['balance'] = actual_balance
     
-    wallet['balance'] -= amount
-    wallet['locked_balance'] = wallet.get('locked_balance', 0.0) + amount
+    current_balance = wallet['balance']
+    locked_balance = wallet.get('locked_balance', 0.0)
+    available_balance = current_balance - locked_balance
+    
+    logger.info(f"Balance check - Total: {current_balance}, Locked: {locked_balance}, Available: {available_balance}, Required: {amount}")
+    
+    if available_balance < amount:
+        raise ValueError(f"Insufficient balance. Available: {available_balance:.2f}, Locked: {locked_balance:.2f}, Required: {amount:.2f}")
+    
+    wallet['balance'] = current_balance - amount
+    wallet['locked_balance'] = locked_balance + amount
     
     JsonDatabase.write(db)
     
