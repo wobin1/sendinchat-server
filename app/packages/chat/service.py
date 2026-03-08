@@ -88,15 +88,21 @@ async def initiate_transfer_in_chat(
         raise ValueError("Transfer only supported in direct chats for now")
     
     receiver_id = partner['id']
+    receiver_username = partner['username']
     
     # Get wallet accounts
-    sender = await conn.fetchrow("SELECT wallet_account FROM users WHERE id = $1", sender_id)
-    receiver = await conn.fetchrow("SELECT wallet_account FROM users WHERE id = $1", receiver_id)
+    sender = await conn.fetchrow("SELECT username, wallet_account FROM users WHERE id = $1", sender_id)
     
-    if not sender['wallet_account'] or not receiver['wallet_account']:
-        raise ValueError("Both users must have wallet accounts linked")
+    if not sender['wallet_account']:
+        raise ValueError(f"You must create a wallet account before sending money")
+    
+    if not partner.get('wallet_account'):
+        raise ValueError(f"@{receiver_username} must create a wallet account before receiving money")
         
     from app.packages.fintech import service as fintech_service
+    
+    sender_wallet = sender['wallet_account']
+    receiver_wallet = partner['wallet_account']
     
     # Create transaction record first (pending)
     txn_record = await conn.fetchrow(
@@ -108,8 +114,8 @@ async def initiate_transfer_in_chat(
         sender_id, receiver_id, amount
     )
     
-    # Hold funds
-    await fintech_service.hold_funds(sender['wallet_account'], amount, conn)
+    # Hold funds from sender's wallet
+    await fintech_service.hold_funds(sender_wallet, amount, conn)
     
     # Send system message about transfer
     message = await send_message(
@@ -428,11 +434,11 @@ async def get_direct_chat_partner(
         user_id: Current user ID
         
     Returns:
-        Dictionary with partner user info, or None if not found
+        Dictionary with partner user info (including wallet_account), or None if not found
     """
     record = await conn.fetchrow(
         """
-        SELECT u.id, u.username
+        SELECT u.id, u.username, u.wallet_account
         FROM chat_members cm
         JOIN users u ON cm.user_id = u.id
         WHERE cm.chat_id = $1 AND cm.user_id != $2
