@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import secrets
 import logging
+import asyncpg
 
 from app.packages.fintech.third_party_client import wallet_api_client, WalletAPIError
 

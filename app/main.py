@@ -33,8 +33,18 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
         logger.info("Database initialized successfully")
+        
+        # Run pending migrations
+        from app.db.migrations import run_pending_migrations
+        from app.db.database import get_pool
+        
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await run_pending_migrations(conn)
+        
     except Exception as e:
-        logger.error(f"Failed to initialize database: {str(e)}")
+        logger.error(f"Failed to initialize database or run migrations: {str(e)}")
+        raise
     
     yield
     
