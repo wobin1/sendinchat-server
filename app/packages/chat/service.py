@@ -167,6 +167,11 @@ async def handle_transfer_action(
     sender_wallet = await conn.fetchval("SELECT wallet_account FROM users WHERE id = $1", msg['sender_id'])
     receiver_wallet = await conn.fetchval("SELECT wallet_account FROM users WHERE id = $1", user_id)
     
+    logger.info(f"🔄 HANDLE_TRANSFER_ACTION:")
+    logger.info(f"   Sender ID: {msg['sender_id']}, Wallet: {sender_wallet}")
+    logger.info(f"   Receiver ID: {user_id}, Wallet: {receiver_wallet}")
+    logger.info(f"   Are they the same? {sender_wallet == receiver_wallet}")
+    
     amount = float(msg['amount'])
     
     if action == "accept":

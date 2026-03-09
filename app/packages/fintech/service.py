@@ -1194,7 +1194,11 @@ async def complete_transfer_from_hold(
     """
     Complete a transfer by moving funds from sender's locked_balance to receiver's balance using PostgreSQL.
     """
-    logger.info(f"Completing transfer for {amount} from {sender_account} to {receiver_account}")
+    logger.info(f"🔄 COMPLETE_TRANSFER_FROM_HOLD called:")
+    logger.info(f"   Sender Account: {sender_account}")
+    logger.info(f"   Receiver Account: {receiver_account}")
+    logger.info(f"   Amount: {amount}")
+    logger.info(f"   Are they the same? {sender_account == receiver_account}")
     
     # Get database connection
     if conn is None:
