@@ -1060,8 +1060,8 @@ async def hold_funds(account_no: str, amount: float, conn: asyncpg.Connection = 
         # Fetch actual balance from third-party API
         try:
             logger.info(f"Fetching balance from API for account {account_no}")
-            api_wallet = await wallet_api_client.wallet_enquiry(account_no)
-            actual_balance = float(api_wallet.get('balance', 0.0))
+            api_wallet = await get_wallet_balance_api(account_no)
+            actual_balance = float(api_wallet.get('availableBalance', api_wallet.get('balance', 0.0)))
             logger.info(f"✅ Fetched actual balance from API: {actual_balance} for account {account_no}")
         except Exception as e:
             logger.error(f"❌ Failed to fetch balance from API for {account_no}: {str(e)}")
