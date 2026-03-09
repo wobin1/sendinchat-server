@@ -376,6 +376,30 @@ async def create_room(
     }
 
 
+@router.get("/partner/{chat_id}")
+async def get_chat_partner(
+    chat_id: int,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """
+    Get the other user's info in a direct chat (for displaying recipient details).
+    """
+    partner = await chat_service.get_direct_chat_partner(conn, chat_id, current_user.id)
+    
+    if not partner:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"status": "error", "message": "Chat partner not found or not a direct chat", "data": None}
+        )
+    
+    return {
+        "status": "success",
+        "message": "Chat partner retrieved successfully",
+        "data": partner
+    }
+
+
 @router.post("/add_member", response_model=StandardMemberResponse)
 async def add_member(
     chat_id: int,
