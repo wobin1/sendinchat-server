@@ -1059,11 +1059,15 @@ async def hold_funds(account_no: str, amount: float, conn: asyncpg.Connection = 
     try:
         # Fetch actual balance from third-party API
         try:
+            logger.info(f"Fetching balance from API for account {account_no}")
             api_wallet = await wallet_api_client.wallet_enquiry(account_no)
             actual_balance = float(api_wallet.get('balance', 0.0))
-            logger.info(f"Fetched actual balance from API: {actual_balance} for account {account_no}")
+            logger.info(f"✅ Fetched actual balance from API: {actual_balance} for account {account_no}")
         except Exception as e:
-            logger.warning(f"Failed to fetch balance from API: {str(e)}")
+            logger.error(f"❌ Failed to fetch balance from API for {account_no}: {str(e)}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             actual_balance = None
         
         # Get or create wallet balance record
@@ -1074,10 +1078,13 @@ async def hold_funds(account_no: str, amount: float, conn: asyncpg.Connection = 
         
         if not wallet_record:
             if actual_balance is None:
-                raise ValueError(f"Account {account_no} not found in database or API")
+                logger.error(f"❌ Cannot create wallet_balances record for {account_no}")
+                logger.error(f"   - Not in wallet_balances table")
+                logger.error(f"   - API wallet enquiry failed (check logs above)")
+                raise ValueError(f"Account {account_no} not found in database and API enquiry failed. Check server logs for API error details.")
             
             # Create new wallet balance record
-            logger.info(f"Creating wallet balance record for {account_no} with balance {actual_balance}")
+            logger.info(f"✅ Creating wallet balance record for {account_no} with balance {actual_balance}")
             await conn.execute(
                 """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
                    VALUES ($1, $2, 0.0, NOW())""",
