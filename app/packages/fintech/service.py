@@ -1199,7 +1199,11 @@ async def complete_transfer_from_hold(
     conn: asyncpg.Connection = None
 ) -> Dict[str, Any]:
     """
-    Complete a transfer by moving funds from sender's locked_balance to receiver's balance using PostgreSQL.
+    Complete a transfer by moving funds from sender's locked_balance to receiver's balance.
+    This function:
+    1. Releases the held funds from sender's locked_balance
+    2. Calls the third-party API to actually transfer the funds
+    3. Updates local database balances
     """
     logger.info(f"🔄 COMPLETE_TRANSFER_FROM_HOLD called:")
     logger.info(f"   Sender Account: {sender_account}")
@@ -1229,25 +1233,44 @@ async def complete_transfer_from_hold(
         if sender_locked < amount:
             raise ValueError(f"Insufficient locked balance for sender. Available: {sender_locked}, Required: {amount}")
         
-        # Get or create receiver wallet balance
-        receiver_record = await conn.fetchrow(
-            "SELECT balance, locked_balance FROM wallet_balances WHERE wallet_account = $1",
-            receiver_account
-        )
+        # Generate transaction ID for the actual transfer
+        transaction_id = generate_transaction_id()
         
-        if not receiver_record:
-            # Create receiver wallet balance record with 0 initial balance
-            logger.info(f"Creating wallet balance record for receiver {receiver_account}")
-            await conn.execute(
-                """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
-                   VALUES ($1, 0.0, 0.0, NOW())""",
-                receiver_account
+        # Step 1: Call the third-party API to actually transfer the funds
+        logger.info(f"Calling third-party API to transfer {amount} from {sender_account} to {receiver_account}")
+        try:
+            # Debit sender's account via API
+            debit_result = await debit_wallet(
+                account_no=sender_account,
+                narration=f"Transfer to {receiver_account}: {narration}",
+                total_amount=amount,
+                transaction_id=f"{transaction_id}-debit",
+                merchant_fee_account="",
+                merchant_fee_amount="0",
+                is_fee=False,
+                transaction_type="debit"
             )
-            receiver_balance = 0.0
-        else:
-            receiver_balance = float(receiver_record['balance'])
+            logger.info(f"✅ Sender debited via API. New balance: {debit_result.get('newBalance', 0.0)}")
+            
+            # Credit receiver's account via API
+            credit_result = await credit_wallet(
+                account_no=receiver_account,
+                narration=f"Transfer from {sender_account}: {narration}",
+                total_amount=amount,
+                transaction_id=f"{transaction_id}-credit",
+                merchant_fee_account="",
+                merchant_fee_amount="0",
+                is_fee="false",
+                transaction_type="credit"
+            )
+            logger.info(f"✅ Receiver credited via API. New balance: {credit_result.get('newBalance', 0.0)}")
+            
+        except Exception as e:
+            logger.error(f"❌ Third-party API transfer failed: {str(e)}")
+            raise ValueError(f"Transfer failed: {str(e)}")
         
-        # Update sender: reduce locked balance
+        # Step 2: Update local database - release locked funds and sync balances
+        # Reduce sender's locked balance (funds were already debited via API)
         new_sender_locked = sender_locked - amount
         await conn.execute(
             """UPDATE wallet_balances 
@@ -1256,21 +1279,38 @@ async def complete_transfer_from_hold(
             new_sender_locked, sender_account
         )
         
-        # Update receiver: increase balance
-        new_receiver_balance = receiver_balance + amount
-        await conn.execute(
-            """UPDATE wallet_balances 
-               SET balance = $1, last_synced_at = NOW() 
-               WHERE wallet_account = $2""",
-            new_receiver_balance, receiver_account
+        # Sync receiver balance from API result
+        receiver_new_balance = float(credit_result.get('newBalance', 0.0))
+        
+        # Get or create receiver wallet balance record
+        receiver_record = await conn.fetchrow(
+            "SELECT balance FROM wallet_balances WHERE wallet_account = $1",
+            receiver_account
         )
         
-        logger.info(f"Transfer completed. Sender locked: {new_sender_locked}, Receiver balance: {new_receiver_balance}")
+        if not receiver_record:
+            # Create receiver wallet balance record
+            logger.info(f"Creating wallet balance record for receiver {receiver_account}")
+            await conn.execute(
+                """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                   VALUES ($1, $2, 0.0, NOW())""",
+                receiver_account, receiver_new_balance
+            )
+        else:
+            # Update receiver balance
+            await conn.execute(
+                """UPDATE wallet_balances 
+                   SET balance = $1, last_synced_at = NOW() 
+                   WHERE wallet_account = $2""",
+                receiver_new_balance, receiver_account
+            )
+        
+        logger.info(f"✅ Transfer completed. Sender locked: {new_sender_locked}, Receiver balance: {receiver_new_balance}")
         
         return {
-            "transactionId": generate_transaction_id(),
+            "transactionId": transaction_id,
             "senderNewLockedBalance": new_sender_locked,
-            "receiverNewBalance": new_receiver_balance
+            "receiverNewBalance": receiver_new_balance
         }
     finally:
         if should_release:
