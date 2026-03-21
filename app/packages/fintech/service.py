@@ -97,6 +97,37 @@ async def create_wallet(
         ValueError: If wallet creation fails
         WalletAPIError: If third-party API request fails
     """
+    # Step 0: Robust Validation
+    required_fields = {
+        "bvn": bvn,
+        "date_of_birth": date_of_birth,
+        "last_name": last_name,
+        "other_names": other_names,
+        "phone_no": phone_no,
+        "account_name": account_name,
+        "place_of_birth": place_of_birth,
+        "address": address,
+        "national_identity_no": national_identity_no,
+        "next_of_kin_phone_no": next_of_kin_phone_no,
+        "next_of_kin_name": next_of_kin_name,
+        "email": email
+    }
+    
+    for field, value in required_fields.items():
+        if not value or str(value).strip() == "":
+            raise ValueError(f"Missing required field: {field}")
+            
+    # Validate date format (DD/MM/YYYY)
+    try:
+        if "/" in date_of_birth:
+            day, month, year = date_of_birth.split("/")
+            if len(year) != 4:
+                raise ValueError("Invalid year in date_of_birth. Expected YYYY.")
+        else:
+             raise ValueError("Date of birth must be in DD/MM/YYYY format")
+    except Exception:
+        raise ValueError("Invalid date_of_birth format. Expected DD/MM/YYYY")
+
     # Step 1: Check if wallet already exists for this BVN
     logger.info(f"Checking for existing wallet with BVN: {bvn[:3]}***")
     try:

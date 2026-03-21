@@ -33,12 +33,21 @@ async def api_exception_handler(request: Request, exc: APIException):
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handler for request validation errors."""
+    errors = exc.errors()
+    message = "Validation error"
+    if errors:
+        # Extract the first error message for a smoother UX
+        first_error = errors[0]
+        field = ".".join(str(loc) for loc in first_error.get("loc", []) if loc != "body")
+        msg = first_error.get("msg", "invalid value")
+        message = f"Validation failed: {field} - {msg}"
+        
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "status": "error",
-            "message": "Validation error",
-            "data": {"errors": exc.errors()}
+            "message": message,
+            "data": {"errors": errors}
         }
     )
 

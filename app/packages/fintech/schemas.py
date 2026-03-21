@@ -8,18 +8,18 @@ from datetime import datetime
 class CreateWalletRequest(BaseModel):
     """Schema for wallet creation request."""
     bvn: str = Field(..., min_length=11, max_length=11, description="Bank Verification Number")
-    dateOfBirth: str = Field(..., description="Date of birth")
+    dateOfBirth: str = Field(..., pattern=r"^\d{2}/\d{2}/\d{4}$", description="Date of birth in DD/MM/YYYY format")
     gender: int = Field(..., ge=1, le=2, description="Gender: 1=Male, 2=Female")
-    lastName: str = Field(..., min_length=1)
-    otherNames: str = Field(..., min_length=1)
-    phoneNo: str = Field(..., min_length=10, max_length=11)
-    transactionTrackingRef: str
-    accountName: str
-    placeOfBirth: str
-    address: str
-    nationalIdentityNo: str
-    nextOfKinPhoneNo: str
-    nextOfKinName: str
+    lastName: str = Field(..., min_length=1, max_length=50)
+    otherNames: str = Field(..., min_length=1, max_length=100)
+    phoneNo: str = Field(..., pattern=r"^0\d{10}$", description="Phone number starting with 0 (11 digits)")
+    transactionTrackingRef: str = Field(..., min_length=5)
+    accountName: str = Field(..., min_length=1)
+    placeOfBirth: str = Field(..., min_length=1)
+    address: str = Field(..., min_length=5)
+    nationalIdentityNo: str = Field(..., min_length=11, max_length=11, description="11-digit NIN")
+    nextOfKinPhoneNo: str = Field(..., pattern=r"^0\d{10}$", description="Next of kin phone number")
+    nextOfKinName: str = Field(..., min_length=1)
     email: EmailStr
 
 
