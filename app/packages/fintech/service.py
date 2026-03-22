@@ -1447,27 +1447,46 @@ async def get_transactions_history_api(
     if not to_date:
         to_date = datetime.utcnow().strftime('%d/%m/%Y')
         
+    def _reformat_date(date_str: str) -> str:
+        """Convert YYYY-MM-DD to DD/MM/YYYY if needed."""
+        if date_str and '-' in date_str:
+            try:
+                parts = date_str.split('-')
+                if len(parts) == 3 and len(parts[0]) == 4:
+                    return f"{parts[2]}/{parts[1]}/{parts[0]}"
+            except Exception:
+                pass
+        return date_str  # Already in DD/MM/YYYY or unknown format
+
     history_data = {
         "accountNumber": account_number,
-        "fromDate": from_date,
-        "toDate": to_date,
+        "fromDate": _reformat_date(from_date),
+        "toDate": _reformat_date(to_date),
         "numberOfItems": str(number_of_items)
     }
+    logger.info(f"Fetching transaction history: account={account_number}, from={history_data['fromDate']}, to={history_data['toDate']}")
     try:
         result = await wallet_api_client.get_transaction_history(history_data)
-        
-        # Robust dictionary access
+        logger.info(f"Raw transaction history response: {json.dumps(result, indent=2)[:500]}")
+
         if not isinstance(result, dict):
             logger.warning(f"Unexpected response type from API: {type(result)}")
             return []
-            
-        # Transactions are inside result["data"]["message"]
-        data = result.get("data", {})
-        if isinstance(data, dict):
-            txns = data.get("message", [])
-        else:
-            txns = []
-        return txns if isinstance(txns, list) else []
+
+        # Try multiple known key paths for the transactions array
+        txns = (
+            result.get("transactions") or
+            result.get("data", {}).get("transactions") or
+            result.get("data", {}).get("message") or
+            result.get("message") or
+            []
+        )
+        if isinstance(txns, list):
+            logger.info(f"Found {len(txns)} transactions")
+            return txns
+
+        logger.warning(f"Unexpected transactions format: {type(txns)}, value: {str(txns)[:200]}")
+        return []
     except Exception as e:
         logger.error(f"Error fetching transaction history: {str(e)}")
         raise ValueError(f"Failed to fetch transaction history: {str(e)}")

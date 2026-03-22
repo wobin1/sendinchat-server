@@ -486,17 +486,6 @@ async def wallet_transactions(request: WalletTransactionsRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"status": "error", "message": "Wallet transactions query failed", "data": None}
         )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e), "data": None}
-        )
-    except Exception as e:
-        logger.error(f"Wallet transactions query failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Wallet transactions query failed", "data": None}
-        )
 
 
 # ============= 6.5 Pending Transactions =============
