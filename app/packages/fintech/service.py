@@ -1462,19 +1462,22 @@ async def get_transactions_history_api(
             logger.warning(f"Unexpected response type from API: {type(result)}")
             return []
 
-        # Try multiple known key paths for the transactions array
-        txns = (
-            result.get("transactions") or
-            result.get("data", {}).get("transactions") or
-            result.get("data", {}).get("message") or
-            result.get("message") or
-            []
-        )
-        if isinstance(txns, list):
-            logger.info(f"Found {len(txns)} transactions")
-            return txns
+        # Try known key paths for the transactions list.
+        # IMPORTANT: do NOT use 'or' chaining — an empty list [] is falsy
+        # and would cause fall-through to the string 'message' field.
+        data = result.get("data", {}) if isinstance(result.get("data"), dict) else {}
 
-        logger.warning(f"Unexpected transactions format: {type(txns)}, value: {str(txns)[:200]}")
+        for txns_val in [
+            result.get("transactions"),
+            data.get("transactions"),
+            data.get("message"),   # The confirmed key from the live API
+            result.get("items"),
+        ]:
+            if isinstance(txns_val, list):
+                logger.info(f"Found {len(txns_val)} transactions")
+                return txns_val
+
+        logger.warning(f"No transaction list found in response keys. data keys: {list(data.keys())}")
         return []
     except Exception as e:
         logger.error(f"Error fetching transaction history: {str(e)}")
