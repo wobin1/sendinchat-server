@@ -413,12 +413,16 @@ async def wallet_enquiry(request: WalletEnquiryRequest):
 
 # ============= 6. Wallet Transactions =============
 @router.post("/wallet/transactions", response_model=StandardWalletTransactionsResponse, status_code=status.HTTP_200_OK)
-async def wallet_transactions(request: WalletTransactionsRequest):
+async def wallet_transactions(
+    request: WalletTransactionsRequest,
+    conn: asyncpg.Connection = Depends(get_connection),
+    current_user: User = Depends(get_current_user)
+):
     """
-    Get wallet transaction history.
-    
-    This endpoint retrieves transaction history for a wallet within a date range.
+    Get wallet transaction history — merges third-party API results with local DB records.
     """
+    # --- 1. Try third-party API ---
+    api_txns = []
     try:
         result = await fintech_service.get_transactions_history_api(
             account_number=request.accountNumber,
@@ -426,66 +430,116 @@ async def wallet_transactions(request: WalletTransactionsRequest):
             to_date=request.toDate,
             number_of_items=int(request.numberOfItems)
         )
-        
-        # Ensure result is a list before iterating
-        if not isinstance(result, list):
-            logger.warning(f"Expected list for transactions, got {type(result)}: {result}")
-            result = []
-
-        # Transform API transactions to TransactionItem format
-        txns = []
-        for t in result:
-            # Derive type and otherParty if possible
-            is_credit = bool(t.get("credit"))
-            is_debit = bool(t.get("debit"))
-            txn_type = "CREDIT" if is_credit else "DEBIT" if is_debit else t.get("postingType", "TRANSFER")
-
-            txns.append(TransactionItem(
-                id=str(t.get("uniqueIdentifier", t.get("id", ""))),
-                type=txn_type,
-                amount=parse_amount(t.get("amount")),
-                narration=t.get("narration", ""),
-                reference=t.get("referenceID", t.get("reference", "")),
-                status=t.get("status", "completed"),
-                createdAt=t.get("transactionDate", ""),
-                otherParty=t.get("otherParty")
-            ))
-            
-        return {
-            "status": "success",
-            "message": "Wallet transactions retrieved successfully",
-            "data": WalletTransactionsResponse(
-                accountNumber=request.accountNumber,
-                transactions=txns,
-                totalCount=len(txns)
-            )
-        }
-
-    except ValueError as e:
-        # Fallback to local
-        try:
-            result = fintech_service.get_wallet_transactions(
-                account_number=request.accountNumber,
-                from_date=request.fromDate,
-                to_date=request.toDate,
-                number_of_items=request.numberOfItems
-            )
-            return {
-                "status": "success",
-                "message": "Wallet transactions retrieved successfully (local)",
-                "data": WalletTransactionsResponse(**result)
-            }
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"status": "error", "message": str(e), "data": None}
-            )
+        if isinstance(result, list):
+            api_txns = result
     except Exception as e:
-        logger.error(f"Wallet transactions query failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Wallet transactions query failed", "data": None}
+        logger.warning(f"Third-party transaction history unavailable: {e}")
+
+    # Transform third-party transactions to TransactionItem format
+    txns = []
+    seen_refs = set()
+    for t in api_txns:
+        is_credit = bool(t.get("credit"))
+        is_debit = bool(t.get("debit"))
+        txn_type = "CREDIT" if is_credit else "DEBIT" if is_debit else t.get("postingType", "TRANSFER")
+        ref = str(t.get("referenceID", t.get("reference", "")))
+        seen_refs.add(ref)
+        txns.append(TransactionItem(
+            id=str(t.get("uniqueIdentifier", t.get("id", ""))),
+            type=txn_type,
+            amount=parse_amount(t.get("amount")),
+            narration=t.get("narration", ""),
+            reference=ref,
+            status=t.get("status", "completed"),
+            createdAt=t.get("transactionDate", ""),
+            otherParty=t.get("otherParty")
+        ))
+
+    # --- 2. Merge with local DB transactions ---
+    try:
+        # Parse date range for filtering
+        from datetime import datetime as dt
+        def parse_date(s: str):
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+                try:
+                    return dt.strptime(s, fmt)
+                except Exception:
+                    pass
+            return None
+
+        from_dt = parse_date(request.fromDate) if request.fromDate else None
+        to_dt = parse_date(request.toDate) if request.toDate else None
+
+        # Find the user owning this wallet account
+        wallet_user = await conn.fetchrow(
+            "SELECT id, username FROM users WHERE wallet_account = $1",
+            request.accountNumber
         )
+        if wallet_user:
+            uid = wallet_user["id"]
+            username = wallet_user["username"]
+
+            # Fetch all transactions for this user from local DB
+            db_rows = await conn.fetch(
+                """
+                SELECT t.id, t.amount, t.status, t.created_at,
+                       s.username as sender_username, s.wallet_account as sender_account,
+                       r.username as receiver_username, r.wallet_account as receiver_account
+                FROM transactions t
+                JOIN users s ON t.sender_id = s.id
+                JOIN users r ON t.receiver_id = r.id
+                WHERE t.sender_id = $1 OR t.receiver_id = $1
+                ORDER BY t.created_at DESC
+                LIMIT $2
+                """,
+                uid,
+                int(request.numberOfItems)
+            )
+
+            for row in db_rows:
+                created_at = row["created_at"]
+                # Filter by date range
+                if from_dt and created_at < from_dt:
+                    continue
+                if to_dt and created_at > to_dt.replace(hour=23, minute=59, second=59):
+                    continue
+
+                local_ref = f"LOCAL-{row['id']}"
+                if local_ref in seen_refs:
+                    continue
+                seen_refs.add(local_ref)
+
+                is_sender = row["sender_username"] == username
+                txn_type = "DEBIT" if is_sender else "CREDIT"
+                other_party = row["receiver_username"] if is_sender else row["sender_username"]
+
+                txns.append(TransactionItem(
+                    id=str(row["id"]),
+                    type=txn_type,
+                    amount=float(row["amount"]),
+                    narration=f"Transfer {'to' if is_sender else 'from'} @{other_party}",
+                    reference=local_ref,
+                    status=row["status"],
+                    createdAt=created_at.isoformat() if created_at else "",
+                    otherParty=other_party
+                ))
+
+            # Sort merged list by date descending
+            txns.sort(key=lambda x: x.createdAt or "", reverse=True)
+
+    except Exception as db_err:
+        logger.error(f"Failed to load local DB transactions: {db_err}")
+
+    return {
+        "status": "success",
+        "message": "Wallet transactions retrieved successfully",
+        "data": WalletTransactionsResponse(
+            accountNumber=request.accountNumber,
+            transactions=txns,
+            totalCount=len(txns)
+        )
+    }
+
 
 
 # ============= 6.5 Pending Transactions =============
