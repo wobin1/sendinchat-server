@@ -1456,7 +1456,7 @@ async def get_transactions_history_api(
     logger.info(f"Fetching transaction history: account={account_number}, from={history_data['fromDate']}, to={history_data['toDate']}")
     try:
         result = await wallet_api_client.get_transaction_history(history_data)
-        logger.info(f"Raw transaction history response: {json.dumps(result, indent=2)[:500]}")
+        logger.info(f"!!! TRANSACTION HISTORY RAW RESPONSE !!!: {json.dumps(result, indent=2)}")
 
         if not isinstance(result, dict):
             logger.warning(f"Unexpected response type from API: {type(result)}")
