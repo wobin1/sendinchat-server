@@ -1443,25 +1443,14 @@ async def get_transactions_history_api(
 ) -> List[Dict[str, Any]]:
     """Fetch transaction history from third-party API."""
     if not from_date:
-        from_date = (datetime.utcnow() - timedelta(days=30)).strftime('%d/%m/%Y')
+        from_date = (datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d')
     if not to_date:
-        to_date = datetime.utcnow().strftime('%d/%m/%Y')
-        
-    def _reformat_date(date_str: str) -> str:
-        """Convert YYYY-MM-DD to DD/MM/YYYY if needed."""
-        if date_str and '-' in date_str:
-            try:
-                parts = date_str.split('-')
-                if len(parts) == 3 and len(parts[0]) == 4:
-                    return f"{parts[2]}/{parts[1]}/{parts[0]}"
-            except Exception:
-                pass
-        return date_str  # Already in DD/MM/YYYY or unknown format
+        to_date = datetime.utcnow().strftime('%Y-%m-%d')
 
     history_data = {
         "accountNumber": account_number,
-        "fromDate": _reformat_date(from_date),
-        "toDate": _reformat_date(to_date),
+        "fromDate": from_date,
+        "toDate": to_date,
         "numberOfItems": str(number_of_items)
     }
     logger.info(f"Fetching transaction history: account={account_number}, from={history_data['fromDate']}, to={history_data['toDate']}")
