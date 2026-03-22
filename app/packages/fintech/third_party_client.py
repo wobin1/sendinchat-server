@@ -157,42 +157,32 @@ class WalletAPIClient:
             raise WalletAPIError(f"Wallet creation error: {str(e)}")
     
     async def credit_transfer(self, transfer_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Credit a wallet via the third-party API.
-        
-        Args:
-            transfer_data: Credit transfer payload
-            
-        Returns:
-            Dict containing transfer response
-            
-        Raises:
-            WalletAPIError: If credit transfer fails
-        """
+        """Credit a wallet via the third-party API."""
         logger.info(f"Processing credit transfer: {transfer_data.get('transactionId', 'N/A')}")
-        
+
         try:
             headers = await self._get_auth_headers()
-            
+            # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
+            body = json.dumps(transfer_data).encode('utf-8')
+
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/credit/transfer",
-                    json=transfer_data,
+                    content=body,
                     headers=headers
                 )
-                
+
                 if response.status_code != 200:
                     error_detail = response.text
                     logger.error(f"Credit transfer failed: {response.status_code} - {error_detail}")
                     raise WalletAPIError(f"Credit transfer failed: {error_detail}")
-                
+
                 data = response.json()
                 logger.info(f"Credit transfer successful: {transfer_data.get('transactionId', 'N/A')}")
                 return data
-                
+
         except httpx.RequestError as e:
             logger.error(f"Network error during credit transfer: {str(e)}")
-            # Try to requery if we have a network error
             txn_id = transfer_data.get('transactionId')
             if txn_id:
                 try:
@@ -201,16 +191,14 @@ class WalletAPIClient:
                         transaction_id=txn_id,
                         amount=transfer_data.get('totalAmount', 0),
                         transaction_type='CREDIT',
-                        transaction_date=datetime.now().strftime('%d/%m/%Y'),
+                        transaction_date=datetime.now().strftime('%Y-%m-%d'),
                         account_no=transfer_data.get('accountNo', '')
                     )
-                    # Check if requery shows success
                     if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
                         logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
                         return requery_result
                 except Exception as re:
                     logger.error(f"Requery failed after network error: {str(re)}")
-            
             raise WalletAPIError(f"Network error during credit transfer: {str(e)}")
         except WalletAPIError:
             raise
@@ -219,42 +207,32 @@ class WalletAPIClient:
             raise WalletAPIError(f"Credit transfer error: {str(e)}")
     
     async def debit_transfer(self, transfer_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Debit a wallet via the third-party API.
-        
-        Args:
-            transfer_data: Debit transfer payload
-            
-        Returns:
-            Dict containing transfer response
-            
-        Raises:
-            WalletAPIError: If debit transfer fails
-        """
+        """Debit a wallet via the third-party API."""
         logger.info(f"Processing debit transfer: {transfer_data.get('transactionId', 'N/A')}")
-        
+
         try:
             headers = await self._get_auth_headers()
-            
+            # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
+            body = json.dumps(transfer_data).encode('utf-8')
+
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/debit/transfer",
-                    json=transfer_data,
+                    content=body,
                     headers=headers
                 )
-                
+
                 if response.status_code != 200:
                     error_detail = response.text
                     logger.error(f"Debit transfer failed: {response.status_code} - {error_detail}")
                     raise WalletAPIError(f"Debit transfer failed: {error_detail}")
-                
+
                 data = response.json()
                 logger.info(f"Debit transfer successful: {transfer_data.get('transactionId', 'N/A')}")
                 return data
-                
+
         except httpx.RequestError as e:
             logger.error(f"Network error during debit transfer: {str(e)}")
-            # Try to requery if we have a network error to see if it actually went through
             txn_id = transfer_data.get('transactionId')
             if txn_id:
                 try:
@@ -263,16 +241,14 @@ class WalletAPIClient:
                         transaction_id=txn_id,
                         amount=transfer_data.get('totalAmount', 0),
                         transaction_type='DEBIT',
-                        transaction_date=datetime.now().strftime('%d/%m/%Y'),
+                        transaction_date=datetime.now().strftime('%Y-%m-%d'),
                         account_no=transfer_data.get('accountNo', '')
                     )
-                    # Check if requery shows success
                     if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
                         logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
                         return requery_result
                 except Exception as re:
                     logger.error(f"Requery failed after network error: {str(re)}")
-            
             raise WalletAPIError(f"Network error during debit transfer: {str(e)}")
         except WalletAPIError:
             raise
