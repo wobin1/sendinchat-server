@@ -133,7 +133,7 @@ async def create_wallet(
     try:
         existing_wallet = await wallet_api_client.get_wallet_by_bvn(bvn)
         if existing_wallet:
-            account_no = existing_wallet.get("accountNo")
+            account_no = existing_wallet.get("accountNo") or existing_wallet.get("accountNumber")
             if account_no:
                 logger.info(f"Found existing wallet for BVN: {account_no}")
                 
@@ -220,9 +220,14 @@ async def create_wallet(
         
         logger.info(f"Wallet created via third-party API: {result.get('accountNo')} for {account_name}")
         
+        account_no = result.get("accountNo") or result.get("accountNumber")
+        if not account_no:
+            logger.error(f"Wallet created but no account number found in response: {result}")
+            raise ValueError("Wallet created but no account number was returned from the provider.")
+
         return {
-            "accountNo": result.get("accountNo"),
-            "accountName": result.get("accountName", account_name),
+            "accountNo": account_no,
+            "accountName": result.get("accountName") or result.get("account_name") or account_name,
             "bvn": bvn,
             "balance": result.get("balance", 0.0)
         }

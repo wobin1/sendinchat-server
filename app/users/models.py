@@ -11,6 +11,7 @@ class User:
         username: str,
         hashed_password: str,
         wallet_account: Optional[str] = None,
+        transaction_pin: Optional[str] = None,
         is_active: bool = True,
         created_at: Optional[datetime] = None
     ):
@@ -18,6 +19,7 @@ class User:
         self.username = username
         self.hashed_password = hashed_password
         self.wallet_account = wallet_account
+        self.transaction_pin = transaction_pin
         self.is_active = is_active
         self.created_at = created_at
     
@@ -29,6 +31,7 @@ class User:
             username=record["username"],
             hashed_password=record["hashed_password"],
             wallet_account=record.get("wallet_account"),
+            transaction_pin=record.get("transaction_pin"),
             is_active=record["is_active"],
             created_at=record.get("created_at")
         )

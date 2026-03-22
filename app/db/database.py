@@ -109,8 +109,9 @@ async def init_db():
         """)
         
         # --- Automatic Migrations (for existing tables) ---
-        # Ensure users table has wallet_account
+        # Ensure users table has wallet_account and transaction_pin
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_account VARCHAR(20) UNIQUE;")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS transaction_pin VARCHAR(255);")
         
         # Ensure messages table has new columns
         await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'text';")

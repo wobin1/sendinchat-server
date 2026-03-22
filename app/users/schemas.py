@@ -13,6 +13,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     wallet_account: Optional[str] = None
+    has_pin: bool = False
     is_active: bool
     
     class Config:
@@ -42,3 +43,18 @@ class TokenResponse(BaseModel):
     status: str
     message: str
     data: Optional[Token] = None
+
+
+class UserPinSet(BaseModel):
+    """Schema for setting a transaction PIN."""
+    pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
+class UserPinVerify(BaseModel):
+    """Schema for verifying a transaction PIN."""
+    pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
+class UserPinStatusResponse(BaseModel):
+    """Schema for PIN status response."""
+    has_pin: bool

@@ -23,7 +23,7 @@ async def get_user_by_username(conn: asyncpg.Connection, username: str) -> Optio
         User object if found, None otherwise
     """
     record = await conn.fetchrow(
-        "SELECT id, username, hashed_password, wallet_account, is_active, created_at FROM users WHERE username = $1",
+        "SELECT id, username, hashed_password, wallet_account, transaction_pin, is_active, created_at FROM users WHERE username = $1",
         username
     )
     
@@ -45,7 +45,7 @@ async def get_user_by_id(conn: asyncpg.Connection, user_id: int) -> Optional[Use
         User object if found, None otherwise
     """
     record = await conn.fetchrow(
-        "SELECT id, username, hashed_password, wallet_account, is_active, created_at FROM users WHERE id = $1",
+        "SELECT id, username, hashed_password, wallet_account, transaction_pin, is_active, created_at FROM users WHERE id = $1",
         user_id
     )
     
@@ -70,7 +70,7 @@ async def search_users(conn: asyncpg.Connection, query: str, limit: int = 20) ->
     # Search for users where username contains the query (case-insensitive)
     records = await conn.fetch(
         """
-        SELECT id, username, hashed_password, wallet_account, is_active, created_at 
+        SELECT id, username, hashed_password, wallet_account, transaction_pin, is_active, created_at 
         FROM users 
         WHERE username ILIKE $1 AND is_active = TRUE
         ORDER BY username
@@ -111,7 +111,7 @@ async def create_user(conn: asyncpg.Connection, username: str, password: str) ->
         """
         INSERT INTO users (username, hashed_password, is_active)
         VALUES ($1, $2, $3)
-        RETURNING id, username, hashed_password, wallet_account, is_active, created_at
+        RETURNING id, username, hashed_password, wallet_account, transaction_pin, is_active, created_at
         """,
         username,
         hashed_pwd,
@@ -248,3 +248,46 @@ async def assign_wallet_account(conn: asyncpg.Connection, user_id: int, wallet_a
     
     rows_affected = int(result.split()[-1])
     return rows_affected > 0
+
+
+async def set_transaction_pin(conn: asyncpg.Connection, user_id: int, pin: str) -> bool:
+    """
+    Set or update a user's transaction PIN.
+    
+    Args:
+        conn: Database connection
+        user_id: ID of user
+        pin: 4-digit plain text PIN (will be hashed)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not pin or len(pin) != 4 or not pin.isdigit():
+        raise ValueError("Transaction PIN must be exactly 4 digits")
+        
+    hashed_pin = hash_password(pin)
+    
+    result = await conn.execute(
+        "UPDATE users SET transaction_pin = $1 WHERE id = $2",
+        hashed_pin,
+        user_id
+    )
+    
+    rows_affected = int(result.split()[-1])
+    if rows_affected > 0:
+        logger.info(f"Transaction PIN updated for user ID: {user_id}")
+        return True
+    
+    return False
+
+
+async def verify_transaction_pin(conn: asyncpg.Connection, user_id: int, pin: str) -> bool:
+    """
+    Verify a user's transaction PIN.
+    """
+    user = await get_user_by_id(conn, user_id)
+    if not user or not user.transaction_pin:
+        logger.warning(f"PIN verification failed: User {user_id} has no PIN set")
+        return False
+        
+    return verify_password(pin, user.transaction_pin)

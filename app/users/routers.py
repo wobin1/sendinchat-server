@@ -6,7 +6,7 @@ import logging
 
 from app.db.database import get_connection
 from app.users.models import User
-from app.users.schemas import UserCreate, UserOut, Token, UserResponse, TokenResponse
+from app.users.schemas import UserCreate, UserOut, Token, UserResponse, TokenResponse, UserPinSet, UserPinVerify
 from app.users import service as user_service
 from app.users import contacts_service
 from app.core.security import create_access_token, verify_token
@@ -129,10 +129,90 @@ async def login(
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     """Get current user information."""
+    # Add has_pin dynamically for UserOut mapping
+    user_out = UserOut.from_orm(current_user)
+    user_out.has_pin = current_user.transaction_pin is not None
+    
     return {
         "status": "success",
         "message": "User retrieved successfully",
-        "data": current_user
+        "data": user_out
+    }
+
+
+@router.post("/pin/set", response_model=UserResponse)
+async def set_pin(
+    pin_data: UserPinSet,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """Set or update transaction PIN."""
+    try:
+        success = await user_service.set_transaction_pin(
+            conn=conn,
+            user_id=current_user.id,
+            pin=pin_data.pin
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to set PIN")
+            
+        # Get updated user
+        updated_user = await user_service.get_user_by_id(conn, current_user.id)
+        user_out = UserOut.from_orm(updated_user)
+        user_out.has_pin = True
+        
+        return {
+            "status": "success",
+            "message": "Transaction PIN updated successfully",
+            "data": user_out
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/pin/verify", response_model=UserResponse)
+async def verify_pin(
+    pin_data: UserPinVerify,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """Verify transaction PIN."""
+    is_valid = await user_service.verify_transaction_pin(
+        conn=conn,
+        user_id=current_user.id,
+        pin=pin_data.pin
+    )
+    
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "status": "error",
+                "message": "Invalid transaction PIN",
+                "data": None
+            }
+        )
+        
+    user_out = UserOut.from_orm(current_user)
+    user_out.has_pin = True
+    
+    return {
+        "status": "success",
+        "message": "PIN verified successfully",
+        "data": user_out
+    }
+
+
+@router.get("/pin/status")
+async def get_pin_status(current_user: User = Depends(get_current_user)):
+    """Check if current user has a PIN set."""
+    return {
+        "status": "success",
+        "message": "PIN status retrieved",
+        "data": {
+            "has_pin": current_user.transaction_pin is not None
+        }
     }
 
 
