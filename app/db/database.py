@@ -83,6 +83,7 @@ async def init_db():
                 content TEXT NOT NULL,
                 message_type VARCHAR(20) DEFAULT 'text',
                 transaction_id VARCHAR(100),
+                read_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -116,6 +117,7 @@ async def init_db():
         # Ensure messages table has new columns
         await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'text';")
         await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(100);")
+        await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP;")
         
         # --- Retroactive Contact Migration ---
         # Add all existing direct chat participants to each other's contacts if not already present

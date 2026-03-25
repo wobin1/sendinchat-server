@@ -17,6 +17,7 @@ class MessageOut(BaseModel):
     message_type: str = "text"
     transaction_id: Optional[str] = None
     transaction_status: Optional[str] = None
+    read_at: Optional[datetime] = None
     created_at: datetime
 
 class SendMessageRequest(BaseModel):

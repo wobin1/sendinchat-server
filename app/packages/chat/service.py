@@ -31,7 +31,7 @@ async def send_message(
         """
         INSERT INTO messages (chat_id, sender_id, content, message_type, transaction_id)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, chat_id, sender_id, content, message_type, transaction_id, created_at
+        RETURNING id, chat_id, sender_id, content, message_type, transaction_id, read_at, created_at
         """,
         chat_id, sender_id, message, message_type, transaction_id
     )
@@ -54,7 +54,7 @@ async def get_chat_messages(
         """
         SELECT m.id, m.chat_id, m.sender_id, u.username as sender_username, 
                m.content, m.message_type, m.transaction_id, t.status as transaction_status,
-               m.created_at
+               m.read_at, m.created_at
         FROM messages m
         JOIN users u ON m.sender_id = u.id
         LEFT JOIN transactions t ON m.transaction_id = t.id::text
@@ -452,3 +452,30 @@ async def get_direct_chat_partner(
     )
     
     return dict(record) if record else None
+
+
+async def mark_messages_as_read(
+    conn: asyncpg.Connection,
+    chat_id: int,
+    user_id: int
+) -> list:
+    """
+    Mark all messages in a chat as read by the current user.
+    Only marks messages sent by others as read.
+    
+    Returns:
+        List of message IDs that were marked as read.
+    """
+    records = await conn.fetch(
+        """
+        UPDATE messages
+        SET read_at = CURRENT_TIMESTAMP
+        WHERE chat_id = $1 
+        AND sender_id != $2 
+        AND read_at IS NULL
+        RETURNING id
+        """,
+        chat_id, user_id
+    )
+    
+    return [r['id'] for r in records]

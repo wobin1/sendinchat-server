@@ -3,6 +3,7 @@ from typing import Dict, List, Set, Tuple
 import logging
 import asyncpg
 import json
+from datetime import datetime
 
 from app.db.database import get_connection
 from app.users.routers import get_current_user
@@ -96,6 +97,41 @@ async def websocket_endpoint(
         while True:
             data = await websocket.receive_json()
             
+            message_type = data.get("type", "message")
+            
+            if message_type == "typing":
+                # Broadcast typing status without persisting to DB
+                typing_data = {
+                    "type": "typing",
+                    "chat_id": chat_id,
+                    "user_id": user.id,
+                    "username": user.username,
+                    "is_typing": data.get("is_typing", True)
+                }
+                await broadcast_to_chat(chat_id, typing_data)
+                continue
+            
+            elif message_type == "read_receipt":
+                # Mark messages as read
+                async with pool.acquire() as conn:
+                    read_message_ids = await chat_service.mark_messages_as_read(
+                        conn=conn,
+                        chat_id=chat_id,
+                        user_id=user.id
+                    )
+                
+                if read_message_ids:
+                    # Broadcast read status to others
+                    read_data = {
+                        "type": "messages_read",
+                        "chat_id": chat_id,
+                        "reader_id": user.id,
+                        "message_ids": read_message_ids,
+                        "read_at": datetime.now().isoformat()
+                    }
+                    await broadcast_to_chat(chat_id, read_data)
+                continue
+
             # Get fresh connection for each message
             async with pool.acquire() as conn:
                 # Persist message to database
