@@ -168,8 +168,10 @@ class WalletAPIClient:
         for attempt in range(max_retries):
             try:
                 headers = await self._get_auth_headers()
-                # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
+                # Serialize manually and set Content-Length to prevent httpx from adding
+                # Transfer-Encoding: chunked, which the bank's server rejects
                 body = json.dumps(transfer_data).encode('utf-8')
+                headers["Content-Length"] = str(len(body))
 
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     response = await client.post(
@@ -250,8 +252,10 @@ class WalletAPIClient:
         for attempt in range(max_retries):
             try:
                 headers = await self._get_auth_headers()
-                # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
+                # Serialize manually and set Content-Length to prevent httpx from adding
+                # Transfer-Encoding: chunked, which the bank's server rejects
                 body = json.dumps(transfer_data).encode('utf-8')
+                headers["Content-Length"] = str(len(body))
 
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     response = await client.post(
