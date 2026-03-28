@@ -157,104 +157,128 @@ class WalletAPIClient:
             raise WalletAPIError(f"Wallet creation error: {str(e)}")
     
     async def credit_transfer(self, transfer_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Credit a wallet via the third-party API."""
-        logger.info(f"Processing credit transfer: {transfer_data.get('transactionId', 'N/A')}")
+        """Credit a wallet via the third-party API with robust retries."""
+        txn_id = transfer_data.get('transactionId', 'N/A')
+        logger.info(f"Processing credit transfer: {txn_id}")
+        
+        max_retries = 3
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                headers = await self._get_auth_headers()
+                # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
+                body = json.dumps(transfer_data).encode('utf-8')
 
-        try:
-            headers = await self._get_auth_headers()
-            # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
-            body = json.dumps(transfer_data).encode('utf-8')
-
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/credit/transfer",
-                    content=body,
-                    headers=headers
-                )
-
-                if response.status_code != 200:
-                    error_detail = response.text
-                    logger.error(f"Credit transfer failed: {response.status_code} - {error_detail}")
-                    raise WalletAPIError(f"Credit transfer failed: {error_detail}")
-
-                data = response.json()
-                logger.info(f"Credit transfer successful: {transfer_data.get('transactionId', 'N/A')}")
-                return data
-
-        except httpx.RequestError as e:
-            logger.error(f"Network error during credit transfer: {str(e)}")
-            txn_id = transfer_data.get('transactionId')
-            if txn_id:
-                try:
-                    logger.info(f"Attempting to requery transaction {txn_id} after network error")
-                    requery_result = await self.requery_transaction(
-                        transaction_id=txn_id,
-                        amount=transfer_data.get('totalAmount', 0),
-                        transaction_type='CREDIT',
-                        transaction_date=datetime.now().strftime('%Y-%m-%d'),
-                        account_no=transfer_data.get('accountNo', '')
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.post(
+                        f"{self.base_url}/credit/transfer",
+                        content=body,
+                        headers=headers
                     )
-                    if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
-                        logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
-                        return requery_result
-                except Exception as re:
-                    logger.error(f"Requery failed after network error: {str(re)}")
-            raise WalletAPIError(f"Network error during credit transfer: {str(e)}")
-        except WalletAPIError:
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error during credit transfer: {str(e)}")
-            raise WalletAPIError(f"Credit transfer error: {str(e)}")
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        logger.info(f"Credit transfer successful (attempt {attempt+1}): {txn_id}")
+                        return data
+                    
+                    error_detail = response.text
+                    logger.error(f"Credit transfer failed (attempt {attempt+1}): {response.status_code} - {error_detail}")
+                    if attempt == max_retries - 1:
+                        raise WalletAPIError(f"Credit transfer failed: {error_detail}")
+
+            except httpx.RequestError as e:
+                last_error = e
+                logger.warning(f"Network error during credit transfer (attempt {attempt+1}): {str(e)}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1) # Small delay before retry
+                    continue
+                
+                # After all retries fail with network error, attempt requery
+                if txn_id != 'N/A':
+                    try:
+                        logger.info(f"Attempting final requery for transaction {txn_id} after {max_retries} failed network attempts")
+                        requery_result = await self.requery_transaction(
+                            transaction_id=txn_id,
+                            amount=transfer_data.get('totalAmount', 0),
+                            transaction_type='CREDIT',
+                            transaction_date=datetime.now().strftime('%Y-%m-%d'),
+                            account_no=transfer_data.get('accountNo', '')
+                        )
+                        if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
+                            logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
+                            return requery_result
+                    except Exception as re:
+                        logger.error(f"Final requery failed: {str(re)}")
+                
+                raise WalletAPIError(f"Network error during credit transfer after {max_retries} attempts: {str(last_error)}")
+            except WalletAPIError:
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error during credit transfer: {str(e)}")
+                raise WalletAPIError(f"Credit transfer error: {str(e)}")
     
     async def debit_transfer(self, transfer_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Debit a wallet via the third-party API."""
-        logger.info(f"Processing debit transfer: {transfer_data.get('transactionId', 'N/A')}")
+        """Debit a wallet via the third-party API with robust retries."""
+        txn_id = transfer_data.get('transactionId', 'N/A')
+        logger.info(f"Processing debit transfer: {txn_id}")
+        
+        max_retries = 3
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                headers = await self._get_auth_headers()
+                # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
+                body = json.dumps(transfer_data).encode('utf-8')
 
-        try:
-            headers = await self._get_auth_headers()
-            # Serialize manually to avoid httpx adding conflicting Transfer-Encoding headers
-            body = json.dumps(transfer_data).encode('utf-8')
-
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/debit/transfer",
-                    content=body,
-                    headers=headers
-                )
-
-                if response.status_code != 200:
-                    error_detail = response.text
-                    logger.error(f"Debit transfer failed: {response.status_code} - {error_detail}")
-                    raise WalletAPIError(f"Debit transfer failed: {error_detail}")
-
-                data = response.json()
-                logger.info(f"Debit transfer successful: {transfer_data.get('transactionId', 'N/A')}")
-                return data
-
-        except httpx.RequestError as e:
-            logger.error(f"Network error during debit transfer: {str(e)}")
-            txn_id = transfer_data.get('transactionId')
-            if txn_id:
-                try:
-                    logger.info(f"Attempting to requery transaction {txn_id} after network error")
-                    requery_result = await self.requery_transaction(
-                        transaction_id=txn_id,
-                        amount=transfer_data.get('totalAmount', 0),
-                        transaction_type='DEBIT',
-                        transaction_date=datetime.now().strftime('%Y-%m-%d'),
-                        account_no=transfer_data.get('accountNo', '')
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.post(
+                        f"{self.base_url}/debit/transfer",
+                        content=body,
+                        headers=headers
                     )
-                    if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
-                        logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
-                        return requery_result
-                except Exception as re:
-                    logger.error(f"Requery failed after network error: {str(re)}")
-            raise WalletAPIError(f"Network error during debit transfer: {str(e)}")
-        except WalletAPIError:
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error during debit transfer: {str(e)}")
-            raise WalletAPIError(f"Debit transfer error: {str(e)}")
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        logger.info(f"Debit transfer successful (attempt {attempt+1}): {txn_id}")
+                        return data
+                    
+                    error_detail = response.text
+                    logger.error(f"Debit transfer failed (attempt {attempt+1}): {response.status_code} - {error_detail}")
+                    if attempt == max_retries - 1:
+                        raise WalletAPIError(f"Debit transfer failed: {error_detail}")
+
+            except httpx.RequestError as e:
+                last_error = e
+                logger.warning(f"Network error during debit transfer (attempt {attempt+1}): {str(e)}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1) # Small delay before retry
+                    continue
+                
+                # After all retries fail with network error, attempt requery
+                if txn_id != 'N/A':
+                    try:
+                        logger.info(f"Attempting final requery for transaction {txn_id} after {max_retries} failed network attempts")
+                        requery_result = await self.requery_transaction(
+                            transaction_id=txn_id,
+                            amount=transfer_data.get('totalAmount', 0),
+                            transaction_type='DEBIT',
+                            transaction_date=datetime.now().strftime('%Y-%m-%d'),
+                            account_no=transfer_data.get('accountNo', '')
+                        )
+                        if isinstance(requery_result, dict) and (requery_result.get("status") == "SUCCESS" or requery_result.get("responseCode") == "00"):
+                            logger.info(f"Requery confirmed transaction {txn_id} was actually successful")
+                            return requery_result
+                    except Exception as re:
+                        logger.error(f"Final requery failed: {str(re)}")
+                
+                raise WalletAPIError(f"Network error during debit transfer after {max_retries} attempts: {str(last_error)}")
+            except WalletAPIError:
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error during debit transfer: {str(e)}")
+                raise WalletAPIError(f"Debit transfer error: {str(e)}")
     
     async def upgrade_wallet(self, upgrade_data: Dict[str, Any]) -> Dict[str, Any]:
         """
