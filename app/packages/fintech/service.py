@@ -741,16 +741,20 @@ async def credit_wallet(
             try:
                 # Update or create wallet record with new balance from API
                 data = result.get("data", {}) if isinstance(result, dict) else {}
-                new_balance_api = data.get("balance", data.get("availableBalance", result.get("balance", 0.0)))
+                new_balance_api = data.get("balance", data.get("availableBalance", result.get("balance")))
                 
-                await conn.execute(
-                    """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
-                       VALUES ($1, $2, 0.0, NOW())
-                       ON CONFLICT (wallet_account) DO UPDATE 
-                       SET balance = $2, last_synced_at = NOW()""",
-                    account_no, float(new_balance_api)
-                )
-                logger.info(f"Synced wallet_balances for {account_no} after credit")
+                # Only update if we actually got a balance from the API
+                if new_balance_api is not None:
+                    await conn.execute(
+                        """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                           VALUES ($1, $2, 0.0, NOW())
+                           ON CONFLICT (wallet_account) DO UPDATE 
+                           SET balance = $2, last_synced_at = NOW()""",
+                        account_no, float(new_balance_api)
+                    )
+                    logger.info(f"Synced wallet_balances for {account_no} after credit: {new_balance_api}")
+                else:
+                    logger.warning(f"No balance data in API response for {account_no}, skipping local sync")
             except Exception as se:
                 logger.warning(f"Failed to sync wallet_balances for {account_no}: {str(se)}")
 
@@ -832,16 +836,20 @@ async def debit_wallet(
             try:
                 # Update or create wallet record with new balance from API
                 data = result.get("data", {}) if isinstance(result, dict) else {}
-                new_balance_api = data.get("balance", data.get("availableBalance", result.get("balance", 0.0)))
+                new_balance_api = data.get("balance", data.get("availableBalance", result.get("balance")))
                 
-                await conn.execute(
-                    """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
-                       VALUES ($1, $2, 0.0, NOW())
-                       ON CONFLICT (wallet_account) DO UPDATE 
-                       SET balance = $2, last_synced_at = NOW()""",
-                    account_no, float(new_balance_api)
-                )
-                logger.info(f"Synced wallet_balances for {account_no} after debit")
+                # Only update if we actually got a balance from the API
+                if new_balance_api is not None:
+                    await conn.execute(
+                        """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                           VALUES ($1, $2, 0.0, NOW())
+                           ON CONFLICT (wallet_account) DO UPDATE 
+                           SET balance = $2, last_synced_at = NOW()""",
+                        account_no, float(new_balance_api)
+                    )
+                    logger.info(f"Synced wallet_balances for {account_no} after debit: {new_balance_api}")
+                else:
+                    logger.warning(f"No balance data in API response for {account_no}, skipping local sync")
             except Exception as se:
                 logger.warning(f"Failed to sync wallet_balances for {account_no}: {str(se)}")
 
@@ -1363,26 +1371,12 @@ async def complete_transfer_from_hold(
             new_sender_locked, sender_account
         )
         
-        # Sync receiver balance from API result
-        receiver_new_balance = float(credit_result.get('newBalance', 0.0))
+        # Sync receiver balance from API result if available
+        data = credit_result.get("data", {}) if isinstance(credit_result, dict) else {}
+        receiver_new_balance = data.get('balance', data.get('availableBalance', credit_result.get('newBalance')))
         
-        # The receiver's balance column was already updated/synced inside credit_wallet()
-        # but we also return the new balance here for the response.
-        # Get or create receiver wallet balance record
-        receiver_record = await conn.fetchrow(
-            "SELECT balance FROM wallet_balances WHERE wallet_account = $1",
-            receiver_account
-        )
-        
-        if not receiver_record:
-            # Create receiver wallet balance record
-            logger.info(f"Creating wallet balance record for receiver {receiver_account}")
-            await conn.execute(
-                """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
-                   VALUES ($1, $2, 0.0, NOW())""",
-                receiver_account, receiver_new_balance
-            )
-        else:
+        if receiver_new_balance is not None:
+            receiver_new_balance = float(receiver_new_balance)
             # Update receiver balance
             await conn.execute(
                 """UPDATE wallet_balances 
@@ -1390,6 +1384,13 @@ async def complete_transfer_from_hold(
                    WHERE wallet_account = $2""",
                 receiver_new_balance, receiver_account
             )
+        else:
+            # Fallback: fetch current balance from DB
+            receiver_new_balance = await conn.fetchval(
+                "SELECT balance FROM wallet_balances WHERE wallet_account = $1",
+                receiver_account
+            )
+            logger.warning(f"No balance data returned after credit for {receiver_account}, using existing DB balance: {receiver_new_balance}")
         
         logger.info(f"✅ Transfer completed. Sender locked: {new_sender_locked}, Receiver balance: {receiver_new_balance}")
         
@@ -1539,8 +1540,27 @@ async def get_wallet_balance_api(account_no: str) -> Dict[str, Any]:
     try:
         result = await wallet_api_client.get_wallet_balance(account_no)
         logger.info(f"!!! THIRD-PARTY BALANCE RESPONSE !!! for {account_no}: {json.dumps(result, indent=2)}")
-        if isinstance(result, dict):
-            return result.get("data", {})
+        if isinstance(result, dict) and result.get("status") == "SUCCESS":
+            data = result.get("data", {})
+            balance = data.get("availableBalance", data.get("balance"))
+            
+            if balance is not None:
+                # Sync to PostgreSQL
+                from app.db.database import get_connection
+                try:
+                    async with get_connection() as conn:
+                        await conn.execute(
+                            """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                               VALUES ($1, $2, 0.0, NOW())
+                               ON CONFLICT (wallet_account) DO UPDATE 
+                               SET balance = $2, last_synced_at = NOW()""",
+                            account_no, float(balance)
+                        )
+                        logger.info(f"Synced local balance for {account_no} during enquiry: {balance}")
+                except Exception as se:
+                    logger.warning(f"Failed to sync local balance during enquiry: {str(se)}")
+            
+            return data
         return {}
     except Exception as e:
         logger.error(f"Error in wallet enquiry for {account_no}: {str(e)}")
