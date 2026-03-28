@@ -15,9 +15,12 @@ async def verify_flow():
     print("Starting verification flow...")
     
     # helper for wallet verification
-    def get_wallet(acc):
-        db = fintech_service.JsonDatabase.read()
-        return next((w for w in db['wallets'] if w['accountNo'] == acc), None)
+    async def get_wallet(conn, acc):
+        record = await conn.fetchrow(
+            "SELECT balance, locked_balance FROM wallet_balances WHERE wallet_account = $1",
+            acc
+        )
+        return dict(record) if record else None
 
     # 1. Initialize DB
     await init_db()
@@ -41,8 +44,31 @@ async def verify_flow():
         await user_service.assign_wallet_account(conn, user_a.id, "1000000001")
         await user_service.assign_wallet_account(conn, user_b.id, "0987654321") # Another mock account
         
-        # Ensure receiver wallet exists in mock_db
+        # Ensure wallets exist in PostgreSQL wallet_balances table
+        print("Ensuring mock accounts exist in wallet_balances table...")
+        await conn.execute(
+            """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+               VALUES ('1000000001', 5000.0, 0.0, NOW())
+               ON CONFLICT (wallet_account) DO UPDATE SET balance = 5000.0, locked_balance = 0.0""",
+        )
+        await conn.execute(
+            """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+               VALUES ('0987654321', 1000.0, 0.0, NOW())
+               ON CONFLICT (wallet_account) DO UPDATE SET balance = 1000.0, locked_balance = 0.0""",
+        )
+
+        # Ensure wallets exist in mock_db.json (for simulate API calls if they ever use it)
         db = fintech_service.JsonDatabase.read()
+        # Find or create sender
+        if not any(w['accountNo'] == "1000000001" for w in db['wallets']):
+            db['wallets'].append({
+                "accountNo": "1000000001",
+                "balance": 5000.0,
+                "locked_balance": 0.0,
+                "createdAt": datetime.utcnow().isoformat() + "Z"
+            })
+        
+        # Find or create receiver
         if not any(w['accountNo'] == "0987654321" for w in db['wallets']):
             db['wallets'].append({
                 "accountNo": "0987654321",
@@ -50,7 +76,7 @@ async def verify_flow():
                 "locked_balance": 0.0,
                 "createdAt": datetime.utcnow().isoformat() + "Z"
             })
-            fintech_service.JsonDatabase.write(db)
+        fintech_service.JsonDatabase.write(db)
             
         # 4. Set transaction PIN for sender
         print("Setting transaction PIN for sender...")
@@ -77,17 +103,20 @@ async def verify_flow():
         print(f"✅ Success: Transfer initiated. Message ID: {msg['id']}, Transaction ID: {msg['transaction_id']}")
         
         # 8. Verify Hold
-        wallet_a = get_wallet("1000000001")
+        wallet_a = await get_wallet(conn, "1000000001")
         print(f"Sender Wallet - Balance: {wallet_a['balance']}, Locked: {wallet_a['locked_balance']}")
+        # In the new model, balance (total) stays the same during hold
         assert wallet_a['locked_balance'] >= 200.0
         
         # 9. Reject Transfer (Verification of rejection)
         print("Rejecting transfer...")
         await chat_service.handle_transfer_action(conn, msg['id'], user_b.id, "reject")
         
-        wallet_a_after_reject = get_wallet("1000000001")
+        wallet_a_after_reject = await get_wallet(conn, "1000000001")
         print(f"After Reject - Balance: {wallet_a_after_reject['balance']}, Locked: {wallet_a_after_reject['locked_balance']}")
+        # In the new model, balance (total) stays the same during release
         assert wallet_a_after_reject['locked_balance'] == wallet_a['locked_balance'] - 200.0
+        assert wallet_a_after_reject['balance'] == wallet_a['balance']
         
         # 10. Initiate second Transfer
         print("Initiating second transfer of 150 units...")
@@ -95,10 +124,16 @@ async def verify_flow():
         
         # 11. Accept Transfer
         print("Accepting transfer...")
+        sender_pre_accept_data = await get_wallet(conn, "1000000001")
+        sender_pre_accept_balance = sender_pre_accept_data['balance']
         await chat_service.handle_transfer_action(conn, msg2['id'], user_b.id, "accept")
         
-        wallet_a_final = get_wallet("1000000001")
-        wallet_b_final = get_wallet("0987654321")
+        wallet_a_final = await get_wallet(conn, "1000000001")
+        wallet_b_final = await get_wallet(conn, "0987654321")
+        print(f"Final Sender Wallet - Balance: {wallet_a_final['balance']}, Locked: {wallet_a_final['locked_balance']}")
+        # In the new model, balance (total) decreases ONLY on completion
+        assert wallet_a_final['balance'] == sender_pre_accept_balance - 150.0
+        assert wallet_a_final['locked_balance'] == 0.0
         print(f"Final Sender Wallet - Balance: {wallet_a_final['balance']}, Locked: {wallet_a_final['locked_balance']}")
         print(f"Final Receiver Wallet - Balance: {wallet_b_final['balance']}")
         

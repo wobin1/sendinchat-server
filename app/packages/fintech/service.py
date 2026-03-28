@@ -1189,7 +1189,9 @@ async def hold_funds(account_no: str, amount: float, conn: asyncpg.Connection = 
             raise ValueError(f"Insufficient balance. Available: {available_balance:.2f}, Locked: {locked_balance:.2f}, Required: {amount:.2f}")
         
         # Update balances
-        new_balance = current_balance - amount
+        # In this model, balance is TOTAL balance (Available + Locked)
+        # hold_funds only increases locked_balance, does NOT change total balance
+        new_balance = current_balance 
         new_locked = locked_balance + amount
         
         await conn.execute(
@@ -1199,7 +1201,7 @@ async def hold_funds(account_no: str, amount: float, conn: asyncpg.Connection = 
             new_balance, new_locked, account_no
         )
         
-        logger.info(f"Held {amount} for {account_no}. New balance: {new_balance}, Locked: {new_locked}")
+        logger.info(f"Held {amount} for {account_no}. Total balance: {new_balance}, Locked: {new_locked}")
         
         return {
             "accountNo": account_no,
@@ -1245,7 +1247,9 @@ async def release_funds(account_no: str, amount: float, conn: asyncpg.Connection
         if locked_balance < amount:
             raise ValueError(f"Insufficient locked balance. Locked: {locked_balance}, Required: {amount}")
         
-        new_balance = balance + amount
+        # In this model, balance is TOTAL balance (Available + Locked)
+        # release_funds only decreases locked_balance, does NOT change total balance
+        new_balance = balance 
         new_locked = locked_balance - amount
         
         await conn.execute(
@@ -1255,7 +1259,7 @@ async def release_funds(account_no: str, amount: float, conn: asyncpg.Connection
             new_balance, new_locked, account_no
         )
         
-        logger.info(f"Released {amount} for {account_no}. New balance: {new_balance}, Locked: {new_locked}")
+        logger.info(f"Released {amount} for {account_no}. Total balance: {new_balance}, Locked: {new_locked}")
         
         return {
             "accountNo": account_no,
@@ -1348,21 +1352,22 @@ async def complete_transfer_from_hold(
             logger.error(f"❌ Third-party API transfer failed: {str(e)}")
             raise ValueError(f"Transfer failed: {str(e)}")
         
-        # Step 2: Update local database - release locked funds and sync balances
-        # Reduce sender's locked balance AND total balance (funds were already debited via API)
+        # Step 2: Update local database - release locked funds
+        # Total balance (balance column) was already updated/synced inside debit_wallet()
         new_sender_locked = sender_locked - amount
-        new_sender_balance = float(sender_record['balance']) - amount
         
         await conn.execute(
             """UPDATE wallet_balances 
-               SET balance = $1, locked_balance = $2, last_synced_at = NOW() 
-               WHERE wallet_account = $3""",
-            new_sender_balance, new_sender_locked, sender_account
+               SET locked_balance = $1, last_synced_at = NOW() 
+               WHERE wallet_account = $2""",
+            new_sender_locked, sender_account
         )
         
         # Sync receiver balance from API result
         receiver_new_balance = float(credit_result.get('newBalance', 0.0))
         
+        # The receiver's balance column was already updated/synced inside credit_wallet()
+        # but we also return the new balance here for the response.
         # Get or create receiver wallet balance record
         receiver_record = await conn.fetchrow(
             "SELECT balance FROM wallet_balances WHERE wallet_account = $1",
