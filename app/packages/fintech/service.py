@@ -708,6 +708,7 @@ async def credit_wallet(
         "narration": narration,
         "totalAmount": str(total_amount),
         "transactionId": transaction_id,
+        "transactionType": transaction_type,
         "merchant": {
             "isFee": is_fee,
             "merchantFeeAccount": merchant_fee_account,
@@ -803,6 +804,7 @@ async def debit_wallet(
         "narration": narration,
         "totalAmount": str(total_amount),
         "transactionId": transaction_id,
+        "transactionType": transaction_type,
         "merchant": {
             "isFee": is_fee,
             "merchantFeeAccount": merchant_fee_account,
@@ -901,13 +903,13 @@ async def transfer_funds(
     
     # Step 0: Idempotency Check - Requery to see if this transaction already succeeded
     try:
-        logger.info(f"Checking idempotency for transaction {transaction_id}...")
+        logger.info(f"Checking idempotency for transaction {transaction_id} (checking CREDIT step)...")
         tsq_result = await wallet_api_client.requery_transaction(
-            transaction_id=f"{transaction_id}-debit",
+            transaction_id=f"{transaction_id}-credit",
             amount=amount,
-            transaction_type='DEBIT',
-            transaction_date=datetime.now().strftime('%d/%m/%Y'),
-            account_no=sender_account_no
+            transaction_type='CREDIT',
+            transaction_date=datetime.now().strftime('%Y-%m-%d'),
+            account_no=receiver_account_no
         )
         if tsq_result.get("status") == "SUCCESS" or tsq_result.get("responseCode") == "00":
             logger.info(f"Transaction {transaction_id} already exists and was successful. Returning existing success.")
