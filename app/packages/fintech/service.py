@@ -1546,9 +1546,10 @@ async def get_wallet_balance_api(account_no: str) -> Dict[str, Any]:
             
             if balance is not None:
                 # Sync to PostgreSQL
-                from app.db.database import get_connection
+                from app.db.database import get_pool
                 try:
-                    async with get_connection() as conn:
+                    db_pool = await get_pool()
+                    async with db_pool.acquire() as conn:
                         await conn.execute(
                             """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
                                VALUES ($1, $2, 0.0, NOW())
