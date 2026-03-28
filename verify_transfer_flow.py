@@ -52,22 +52,36 @@ async def verify_flow():
             })
             fintech_service.JsonDatabase.write(db)
             
-        # 4. Create direct chat
+        # 4. Set transaction PIN for sender
+        print("Setting transaction PIN for sender...")
+        await user_service.set_transaction_pin(conn, user_a.id, "1234")
+        
+        # 5. Create direct chat
         chat = await chat_service.create_or_get_direct_chat(conn, user_a.id, user_b.id)
         chat_id = chat['id']
         print(f"Chat created: {chat_id}")
         
-        # 5. Initiate Transfer
-        print("Initiating transfer of 200 units...")
-        msg = await chat_service.initiate_transfer_in_chat(conn, chat_id, user_a.id, 200.0)
-        print(f"Transfer initiated. Message ID: {msg['id']}, Transaction ID: {msg['transaction_id']}")
+        # 6. Test Initiate Transfer with INCORRECT PIN
+        print("Testing initiation with INCORRECT PIN (9999)...")
+        try:
+            await chat_service.initiate_transfer_in_chat(conn, chat_id, user_a.id, 200.0, "9999")
+            print("❌ Error: Transfer initiated with incorrect PIN!")
+            return
+        except ValueError as e:
+            print(f"✅ Success: Caught expected error: {str(e)}")
+            assert str(e) == "Invalid transaction PIN"
+
+        # 7. Test Initiate Transfer with CORRECT PIN
+        print("Testing initiation with CORRECT PIN (1234)...")
+        msg = await chat_service.initiate_transfer_in_chat(conn, chat_id, user_a.id, 200.0, "1234")
+        print(f"✅ Success: Transfer initiated. Message ID: {msg['id']}, Transaction ID: {msg['transaction_id']}")
         
-        # 6. Verify Hold
+        # 8. Verify Hold
         wallet_a = get_wallet("1000000001")
         print(f"Sender Wallet - Balance: {wallet_a['balance']}, Locked: {wallet_a['locked_balance']}")
         assert wallet_a['locked_balance'] >= 200.0
         
-        # 7. Reject Transfer (Verification of rejection)
+        # 9. Reject Transfer (Verification of rejection)
         print("Rejecting transfer...")
         await chat_service.handle_transfer_action(conn, msg['id'], user_b.id, "reject")
         
@@ -75,11 +89,11 @@ async def verify_flow():
         print(f"After Reject - Balance: {wallet_a_after_reject['balance']}, Locked: {wallet_a_after_reject['locked_balance']}")
         assert wallet_a_after_reject['locked_balance'] == wallet_a['locked_balance'] - 200.0
         
-        # 8. Initiate second Transfer
+        # 10. Initiate second Transfer
         print("Initiating second transfer of 150 units...")
-        msg2 = await chat_service.initiate_transfer_in_chat(conn, chat_id, user_a.id, 150.0)
+        msg2 = await chat_service.initiate_transfer_in_chat(conn, chat_id, user_a.id, 150.0, "1234")
         
-        # 9. Accept Transfer
+        # 11. Accept Transfer
         print("Accepting transfer...")
         await chat_service.handle_transfer_action(conn, msg2['id'], user_b.id, "accept")
         

@@ -692,7 +692,8 @@ async def credit_wallet(
     merchant_fee_account: str,
     merchant_fee_amount: str,
     is_fee: bool,
-    transaction_type: str
+    transaction_type: str,
+    conn: asyncpg.Connection = None
 ) -> Dict[str, Any]:
     """
     Credit a wallet via third-party API.
@@ -734,7 +735,25 @@ async def credit_wallet(
         }
         db['transactions'].append(transaction)
         JsonDatabase.write(db)
-        
+
+        # Sync with PostgreSQL wallet_balances if connection provided
+        if conn:
+            try:
+                # Update or create wallet record with new balance from API
+                data = result.get("data", {}) if isinstance(result, dict) else {}
+                new_balance_api = data.get("balance", data.get("availableBalance", result.get("balance", 0.0)))
+                
+                await conn.execute(
+                    """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                       VALUES ($1, $2, 0.0, NOW())
+                       ON CONFLICT (wallet_account) DO UPDATE 
+                       SET balance = $2, last_synced_at = NOW()""",
+                    account_no, float(new_balance_api)
+                )
+                logger.info(f"Synced wallet_balances for {account_no} after credit")
+            except Exception as se:
+                logger.warning(f"Failed to sync wallet_balances for {account_no}: {str(se)}")
+
         logger.info(f"Wallet credited via third-party API: {account_no} with {total_amount}")
         
         # Robust balance extraction
@@ -764,7 +783,8 @@ async def debit_wallet(
     merchant_fee_account: str,
     merchant_fee_amount: str,
     is_fee: bool,
-    transaction_type: str
+    transaction_type: str,
+    conn: asyncpg.Connection = None
 ) -> Dict[str, Any]:
     """
     Debit a wallet via third-party API.
@@ -806,7 +826,25 @@ async def debit_wallet(
         }
         db['transactions'].append(transaction)
         JsonDatabase.write(db)
-        
+
+        # Sync with PostgreSQL wallet_balances if connection provided
+        if conn:
+            try:
+                # Update or create wallet record with new balance from API
+                data = result.get("data", {}) if isinstance(result, dict) else {}
+                new_balance_api = data.get("balance", data.get("availableBalance", result.get("balance", 0.0)))
+                
+                await conn.execute(
+                    """INSERT INTO wallet_balances (wallet_account, balance, locked_balance, last_synced_at)
+                       VALUES ($1, $2, 0.0, NOW())
+                       ON CONFLICT (wallet_account) DO UPDATE 
+                       SET balance = $2, last_synced_at = NOW()""",
+                    account_no, float(new_balance_api)
+                )
+                logger.info(f"Synced wallet_balances for {account_no} after debit")
+            except Exception as se:
+                logger.warning(f"Failed to sync wallet_balances for {account_no}: {str(se)}")
+
         logger.info(f"Wallet debited via third-party API: {account_no} with {total_amount}")
         
         # Robust balance extraction
@@ -836,7 +874,8 @@ async def transfer_funds(
     transaction_id: str,
     merchant_fee_account: str,
     merchant_fee_amount: str,
-    is_fee: bool
+    is_fee: bool,
+    conn: asyncpg.Connection = None
 ) -> Dict[str, Any]:
     """
     Transfer funds from sender wallet to receiver wallet.
@@ -888,7 +927,8 @@ async def transfer_funds(
             merchant_fee_account=merchant_fee_account,
             merchant_fee_amount=merchant_fee_amount,
             is_fee=is_fee,
-            transaction_type="debit"
+            transaction_type="debit",
+            conn=conn
         )
         sender_new_balance = debit_result.get("newBalance", 0.0)
         logger.info(f"Sender debited successfully. New balance: {sender_new_balance}")
@@ -904,9 +944,10 @@ async def transfer_funds(
             total_amount=amount,
             transaction_id=f"{transaction_id}-credit",
             merchant_fee_account=merchant_fee_account,
-            merchant_fee_amount="0",  # No fee on receiver side
-            is_fee="false",
-            transaction_type="credit"
+            merchant_fee_amount=merchant_fee_amount,
+            is_fee=is_fee,
+            transaction_type="credit",
+            conn=conn
         )
         receiver_new_balance = credit_result.get("newBalance", 0.0)
         logger.info(f"Receiver credited successfully. New balance: {receiver_new_balance}")
@@ -1284,7 +1325,8 @@ async def complete_transfer_from_hold(
                 merchant_fee_account="",
                 merchant_fee_amount="0",
                 is_fee=False,
-                transaction_type="debit"
+                transaction_type="debit",
+                conn=conn
             )
             logger.info(f"✅ Sender debited via API. New balance: {debit_result.get('newBalance', 0.0)}")
             
@@ -1296,8 +1338,9 @@ async def complete_transfer_from_hold(
                 transaction_id=f"{transaction_id}-credit",
                 merchant_fee_account="",
                 merchant_fee_amount="0",
-                is_fee="false",
-                transaction_type="credit"
+                is_fee=False,
+                transaction_type="credit",
+                conn=conn
             )
             logger.info(f"✅ Receiver credited via API. New balance: {credit_result.get('newBalance', 0.0)}")
             
@@ -1306,13 +1349,15 @@ async def complete_transfer_from_hold(
             raise ValueError(f"Transfer failed: {str(e)}")
         
         # Step 2: Update local database - release locked funds and sync balances
-        # Reduce sender's locked balance (funds were already debited via API)
+        # Reduce sender's locked balance AND total balance (funds were already debited via API)
         new_sender_locked = sender_locked - amount
+        new_sender_balance = float(sender_record['balance']) - amount
+        
         await conn.execute(
             """UPDATE wallet_balances 
-               SET locked_balance = $1, last_synced_at = NOW() 
-               WHERE wallet_account = $2""",
-            new_sender_locked, sender_account
+               SET balance = $1, locked_balance = $2, last_synced_at = NOW() 
+               WHERE wallet_account = $3""",
+            new_sender_balance, new_sender_locked, sender_account
         )
         
         # Sync receiver balance from API result

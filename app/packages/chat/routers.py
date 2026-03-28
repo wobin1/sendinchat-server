@@ -186,6 +186,7 @@ async def initiate_transfer(
             chat_id=request.chat_id,
             sender_id=current_user.id,
             amount=request.amount,
+            pin=request.pin,
             narration=request.narration
         )
         

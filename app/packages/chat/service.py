@@ -73,15 +73,23 @@ async def initiate_transfer_in_chat(
     chat_id: int,
     sender_id: int,
     amount: float,
+    pin: str,
     narration: str = "Chat transfer"
 ) -> dict:
     """
     Initiate a transfer within a chat.
-    1. Find recipient in chat
-    2. Create pending transaction
-    3. Hold funds in fintech service
-    4. Send transfer message
+    1. Verify transaction PIN
+    2. Find recipient in chat
+    3. Create pending transaction
+    4. Hold funds in fintech service
+    5. Send transfer message
     """
+    from app.users import service as user_service
+
+    # Verify transaction PIN
+    is_valid_pin = await user_service.verify_transaction_pin(conn, sender_id, pin)
+    if not is_valid_pin:
+        raise ValueError("Invalid transaction PIN")
     # For direct chats only for now
     partner = await get_direct_chat_partner(conn, chat_id, sender_id)
     if not partner:
