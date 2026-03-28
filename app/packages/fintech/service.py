@@ -901,50 +901,71 @@ async def transfer_funds(
     """
     logger.info(f"Processing transfer: {amount} from {sender_account_no} to {receiver_account_no} (ID: {transaction_id})")
     
-    # Step 0: Idempotency Check - Requery to see if this transaction already succeeded
+    # Step 0: Idempotency Check - Check if this transfer already completed or partially completed
+    debit_already_done = False
     try:
+        # First check if the CREDIT step already succeeded (= fully complete)
         logger.info(f"Checking idempotency for transaction {transaction_id} (checking CREDIT step)...")
-        tsq_result = await wallet_api_client.requery_transaction(
+        tsq_credit = await wallet_api_client.requery_transaction(
             transaction_id=f"{transaction_id}-credit",
             amount=amount,
             transaction_type='CREDIT',
             transaction_date=datetime.now().strftime('%Y-%m-%d'),
             account_no=receiver_account_no
         )
-        if tsq_result.get("status") == "SUCCESS" or tsq_result.get("responseCode") == "00":
-            logger.info(f"Transaction {transaction_id} already exists and was successful. Returning existing success.")
-            # We don't have the full original result easily, so we return a synthetic success
-            # This is safer than processing again.
+        if tsq_credit.get("status") == "SUCCESS" or tsq_credit.get("responseCode") == "00":
+            logger.info(f"Transaction {transaction_id} fully completed (credit found). Returning existing success.")
             return {
                 "transactionId": transaction_id,
                 "senderAccountNo": sender_account_no,
                 "receiverAccountNo": receiver_account_no,
                 "amount": amount,
-                "senderNewBalance": 0.0, # Balance might be stale here but it's safe
+                "senderNewBalance": 0.0,
                 "receiverNewBalance": 0.0,
                 "isDuplicate": True
             }
     except Exception as e:
-        logger.info(f"Idempotency check (TSQ) found no prior success for {transaction_id}: {str(e)}")
+        logger.info(f"Credit idempotency check found no prior success for {transaction_id}: {str(e)}")
     
-    # Step 1: Debit sender's account
+    # Check if DEBIT step already succeeded (= partially complete, need to skip to credit)
     try:
-        debit_result = await debit_wallet(
-            account_no=sender_account_no,
-            narration=f"Transfer to {receiver_account_no}: {narration}",
-            total_amount=amount,
+        logger.info(f"Checking if debit already succeeded for {transaction_id}...")
+        tsq_debit = await wallet_api_client.requery_transaction(
             transaction_id=f"{transaction_id}-debit",
-            merchant_fee_account=merchant_fee_account,
-            merchant_fee_amount=merchant_fee_amount,
-            is_fee=is_fee,
-            transaction_type="debit",
-            conn=conn
+            amount=amount,
+            transaction_type='DEBIT',
+            transaction_date=datetime.now().strftime('%Y-%m-%d'),
+            account_no=sender_account_no
         )
-        sender_new_balance = debit_result.get("newBalance", 0.0)
-        logger.info(f"Sender debited successfully. New balance: {sender_new_balance}")
+        if tsq_debit.get("status") == "SUCCESS" or tsq_debit.get("responseCode") == "00":
+            logger.info(f"Debit for {transaction_id} already succeeded. Skipping debit, proceeding to credit only.")
+            debit_already_done = True
     except Exception as e:
-        logger.error(f"Failed to debit sender: {str(e)}")
-        raise ValueError(f"Transfer failed: Unable to debit sender account - {str(e)}")
+        logger.info(f"Debit idempotency check found no prior success for {transaction_id}: {str(e)}")
+    
+    # Step 1: Debit sender's account (skip if already done)
+    sender_new_balance = 0.0
+    if not debit_already_done:
+        try:
+            debit_result = await debit_wallet(
+                account_no=sender_account_no,
+                narration=f"Transfer to {receiver_account_no}: {narration}",
+                total_amount=amount,
+                transaction_id=f"{transaction_id}-debit",
+                merchant_fee_account=merchant_fee_account,
+                merchant_fee_amount=merchant_fee_amount,
+                is_fee=is_fee,
+                transaction_type="debit",
+                conn=conn
+            )
+            sender_new_balance = debit_result.get("newBalance", 0.0)
+            logger.info(f"Sender debited successfully. New balance: {sender_new_balance}")
+        except Exception as e:
+            logger.error(f"Failed to debit sender: {str(e)}")
+            raise ValueError(f"Transfer failed: Unable to debit sender account - {str(e)}")
+    else:
+        logger.info(f"Skipping debit for {transaction_id} - already completed on bank side")
+
     
     # Step 2: Credit receiver's account
     try:

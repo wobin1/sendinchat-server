@@ -2,6 +2,7 @@
 Third-party wallet API client.
 Handles authentication and API requests to the external wallet service.
 """
+import asyncio
 import httpx
 import json
 import logging
@@ -184,6 +185,26 @@ class WalletAPIClient:
                     
                     error_detail = response.text
                     logger.error(f"Credit transfer failed (attempt {attempt+1}): {response.status_code} - {error_detail}")
+                    
+                    # If bank says "Duplicate transaction", the first attempt actually succeeded
+                    try:
+                        error_json = response.json()
+                        error_data = error_json.get('data', {}) if isinstance(error_json, dict) else {}
+                        if error_data.get('responseCode') == '42':
+                            logger.info(f"Bank reports duplicate for {txn_id}, requerying to confirm...")
+                            requery_result = await self.requery_transaction(
+                                transaction_id=txn_id,
+                                amount=transfer_data.get('totalAmount', 0),
+                                transaction_type='CREDIT',
+                                transaction_date=datetime.now().strftime('%Y-%m-%d'),
+                                account_no=transfer_data.get('accountNo', '')
+                            )
+                            if isinstance(requery_result, dict) and (requery_result.get('status') == 'SUCCESS' or requery_result.get('responseCode') == '00'):
+                                logger.info(f"Requery confirmed duplicate {txn_id} was successful")
+                                return requery_result
+                    except Exception as dup_err:
+                        logger.warning(f"Duplicate check/requery failed: {str(dup_err)}")
+                    
                     if attempt == max_retries - 1:
                         raise WalletAPIError(f"Credit transfer failed: {error_detail}")
 
@@ -246,6 +267,26 @@ class WalletAPIClient:
                     
                     error_detail = response.text
                     logger.error(f"Debit transfer failed (attempt {attempt+1}): {response.status_code} - {error_detail}")
+                    
+                    # If bank says "Duplicate transaction", the first attempt actually succeeded
+                    try:
+                        error_json = response.json()
+                        error_data = error_json.get('data', {}) if isinstance(error_json, dict) else {}
+                        if error_data.get('responseCode') == '42':
+                            logger.info(f"Bank reports duplicate for {txn_id}, requerying to confirm...")
+                            requery_result = await self.requery_transaction(
+                                transaction_id=txn_id,
+                                amount=transfer_data.get('totalAmount', 0),
+                                transaction_type='DEBIT',
+                                transaction_date=datetime.now().strftime('%Y-%m-%d'),
+                                account_no=transfer_data.get('accountNo', '')
+                            )
+                            if isinstance(requery_result, dict) and (requery_result.get('status') == 'SUCCESS' or requery_result.get('responseCode') == '00'):
+                                logger.info(f"Requery confirmed duplicate {txn_id} was successful")
+                                return requery_result
+                    except Exception as dup_err:
+                        logger.warning(f"Duplicate check/requery failed: {str(dup_err)}")
+                    
                     if attempt == max_retries - 1:
                         raise WalletAPIError(f"Debit transfer failed: {error_detail}")
 
