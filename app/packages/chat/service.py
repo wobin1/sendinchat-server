@@ -183,8 +183,17 @@ async def handle_transfer_action(
     amount = float(msg['amount'])
     
     if action == "accept":
-        await fintech_service.complete_transfer_from_hold(sender_wallet, receiver_wallet, amount, conn=conn)
-        new_status = 'completed'
+        try:
+            await fintech_service.complete_transfer_from_hold(sender_wallet, receiver_wallet, amount, conn=conn)
+            new_status = 'completed'
+        except Exception as e:
+            logger.error(f"❌ Failed to accept transfer: {str(e)}")
+            # Update transaction status to failed
+            await conn.execute(
+                "UPDATE transactions SET status = 'failed' WHERE id = $1",
+                int(msg['transaction_id'])
+            )
+            raise ValueError(f"Transfer acceptance failed: {str(e)}")
     elif action == "reject":
         await fintech_service.release_funds(sender_wallet, amount, conn)
         new_status = 'rejected'
