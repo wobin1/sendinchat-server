@@ -17,6 +17,7 @@ from app.packages.chat.schemas import (
 )
 from app.packages.chat import service as chat_service
 from app.core.security import verify_token
+from app.core.exceptions import PinNotSetError
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -212,6 +213,15 @@ async def initiate_transfer(
             "message": "Transfer initiated successfully",
             "data": message
         }
+    except PinNotSetError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": str(e),
+                "data": {"error_code": "PIN_NOT_SET", "requires_pin_setup": True}
+            }
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

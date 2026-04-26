@@ -19,6 +19,11 @@ class APIException(Exception):
         super().__init__(message)
 
 
+class PinNotSetError(Exception):
+    """Raised when a user attempts a PIN-protected action without having set a PIN."""
+    pass
+
+
 async def api_exception_handler(request: Request, exc: APIException):
     """Handler for custom API exceptions."""
     return JSONResponse(

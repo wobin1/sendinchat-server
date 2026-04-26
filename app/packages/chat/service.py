@@ -4,6 +4,7 @@ Chat service layer - handles all chat-related business logic.
 import asyncpg
 from typing import Optional, Dict
 import logging
+from app.core.exceptions import PinNotSetError
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,14 @@ async def initiate_transfer_in_chat(
     5. Send transfer message
     """
     from app.users import service as user_service
+
+    # Check if user has a PIN set before attempting verification
+    sender_user = await user_service.get_user_by_id(conn, sender_id)
+    if not sender_user or not sender_user.transaction_pin:
+        raise PinNotSetError("You haven't set a transfer PIN yet. Please create a PIN to send money.")
+
+    if not pin:
+        raise ValueError("Transfer PIN is required to send money.")
 
     # Verify transaction PIN
     is_valid_pin = await user_service.verify_transaction_pin(conn, sender_id, pin)

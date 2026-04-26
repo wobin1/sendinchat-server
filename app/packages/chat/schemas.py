@@ -28,7 +28,7 @@ class InitiateTransferRequest(BaseModel):
     """Request model for initiating a transfer in chat"""
     chat_id: int
     amount: float
-    pin: str
+    pin: Optional[str] = None
     narration: Optional[str] = "Chat transfer"
 
 class HandleTransferRequest(BaseModel):

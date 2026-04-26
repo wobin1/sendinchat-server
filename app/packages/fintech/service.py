@@ -195,11 +195,27 @@ async def create_wallet(
         # Call third-party API
         result = await wallet_api_client.create_wallet(wallet_data)
         
+        # Extract account number from nested data structure
+        response_data = result.get("data", {})
+        account_no = (
+            response_data.get("accountNumber") or 
+            response_data.get("accountNo") or 
+            result.get("accountNumber") or 
+            result.get("accountNo")
+        )
+        # Extract account name (fullName from data or fallback to provided name)
+        extracted_account_name = (
+            response_data.get("fullName") or 
+            result.get("accountName") or 
+            result.get("account_name") or 
+            account_name
+        )
+        
         # Store wallet info in local database for reference
         db = JsonDatabase.read()
         wallet = {
-            "accountNo": result.get("accountNo"),
-            "accountName": account_name,
+            "accountNo": account_no,
+            "accountName": extracted_account_name,
             "bvn": bvn,
             "dateOfBirth": date_of_birth,
             "gender": gender,
@@ -218,18 +234,17 @@ async def create_wallet(
         db['wallets'].append(wallet)
         JsonDatabase.write(db)
         
-        logger.info(f"Wallet created via third-party API: {result.get('accountNo')} for {account_name}")
+        logger.info(f"Wallet created via third-party API: {account_no} for {extracted_account_name}")
         
-        account_no = result.get("accountNo") or result.get("accountNumber")
         if not account_no:
             logger.error(f"Wallet created but no account number found in response: {result}")
             raise ValueError("Wallet created but no account number was returned from the provider.")
 
         return {
             "accountNo": account_no,
-            "accountName": result.get("accountName") or result.get("account_name") or account_name,
+            "accountName": extracted_account_name,
             "bvn": bvn,
-            "balance": result.get("balance", 0.0)
+            "balance": response_data.get("balance") or result.get("balance", 0.0)
         }
     except WalletAPIError as e:
         # Step 3: Enhanced DUPLICATE error handling

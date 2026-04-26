@@ -10,11 +10,18 @@ async def get_pool() -> asyncpg.Pool:
     """Get the database connection pool."""
     global pool
     if pool is None:
+        # Ensure SSL is configured for Neon PostgreSQL
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
         pool = await asyncpg.create_pool(
             settings.DATABASE_URL,
             min_size=5,
             max_size=20,
-            command_timeout=60
+            command_timeout=60,
+            ssl=ssl_context
         )
     return pool
 
