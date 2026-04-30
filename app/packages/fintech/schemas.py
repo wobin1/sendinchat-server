@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, model_validator
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -7,20 +7,36 @@ from datetime import datetime
 # ============= Wallet Creation =============
 class CreateWalletRequest(BaseModel):
     """Schema for wallet creation request."""
-    bvn: str = Field(..., min_length=11, max_length=11, description="Bank Verification Number")
+    bvn: Optional[str] = Field(None, min_length=11, max_length=11, description="Bank Verification Number (required if NIN not provided)")
     dateOfBirth: str = Field(..., pattern=r"^\d{2}/\d{2}/\d{4}$", description="Date of birth in DD/MM/YYYY format")
     gender: int = Field(..., ge=1, le=2, description="Gender: 1=Male, 2=Female")
     lastName: str = Field(..., min_length=1, max_length=50)
     otherNames: str = Field(..., min_length=1, max_length=100)
     phoneNo: str = Field(..., pattern=r"^0\d{10}$", description="Phone number starting with 0 (11 digits)")
     transactionTrackingRef: str = Field(..., min_length=5)
-    accountName: str = Field(..., min_length=1)
-    placeOfBirth: str = Field(..., min_length=1)
+    accountName: Optional[str] = Field(None, min_length=1)
+    placeOfBirth: Optional[str] = Field(None, min_length=1)
     address: str = Field(..., min_length=5)
-    nationalIdentityNo: str = Field(..., min_length=11, max_length=11, description="11-digit NIN")
-    nextOfKinPhoneNo: str = Field(..., pattern=r"^0\d{10}$", description="Next of kin phone number")
-    nextOfKinName: str = Field(..., min_length=1)
+    nationalIdentityNo: Optional[str] = Field(None, min_length=11, max_length=11, description="11-digit NIN (required if BVN not provided)")
+    ninUserId: Optional[str] = Field(None, min_length=1, description="NIN User ID (required if NIN provided)")
+    nextOfKinPhoneNo: Optional[str] = Field(None, pattern=r"^0\d{10}$", description="Next of kin phone number")
+    nextOfKinName: Optional[str] = Field(None, min_length=1)
     email: EmailStr
+
+    @model_validator(mode='after')
+    def check_bvn_or_nin(self):
+        """Ensure either BVN or NIN is provided."""
+        bvn = self.bvn
+        nin = self.nationalIdentityNo
+        nin_user_id = self.ninUserId
+
+        if not bvn and not nin:
+            raise ValueError('Either BVN or NIN must be provided')
+
+        if nin and not nin_user_id:
+            raise ValueError('NIN User ID is required when NIN is provided')
+
+        return self
 
 
 class WalletResponse(BaseModel):

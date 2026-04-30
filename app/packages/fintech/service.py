@@ -74,19 +74,20 @@ def generate_reference() -> str:
 
 # ============= 1. Create Wallet =============
 async def create_wallet(
-    bvn: str,
+    bvn: Optional[str],
     date_of_birth: str,
     gender: int,
     last_name: str,
     other_names: str,
     phone_no: str,
     transaction_tracking_ref: str,
-    account_name: str,
-    place_of_birth: str,
+    account_name: Optional[str],
+    place_of_birth: Optional[str],
     address: str,
-    national_identity_no: str,
-    next_of_kin_phone_no: str,
-    next_of_kin_name: str,
+    national_identity_no: Optional[str],
+    nin_user_id: Optional[str],
+    next_of_kin_phone_no: Optional[str],
+    next_of_kin_name: Optional[str],
     email: str
 ) -> Dict[str, Any]:
     """
@@ -97,19 +98,19 @@ async def create_wallet(
         ValueError: If wallet creation fails
         WalletAPIError: If third-party API request fails
     """
-    # Step 0: Robust Validation
+    # Step 0: Robust Validation - only for mandatory fields
+    if not bvn and not national_identity_no:
+        raise ValueError("Either BVN or NIN must be provided")
+    
+    if national_identity_no and not nin_user_id:
+        raise ValueError("NIN User ID is required when NIN is provided")
+    
     required_fields = {
-        "bvn": bvn,
         "date_of_birth": date_of_birth,
         "last_name": last_name,
         "other_names": other_names,
         "phone_no": phone_no,
-        "account_name": account_name,
-        "place_of_birth": place_of_birth,
         "address": address,
-        "national_identity_no": national_identity_no,
-        "next_of_kin_phone_no": next_of_kin_phone_no,
-        "next_of_kin_name": next_of_kin_name,
         "email": email
     }
     
@@ -128,10 +129,11 @@ async def create_wallet(
     except Exception:
         raise ValueError("Invalid date_of_birth format. Expected DD/MM/YYYY")
 
-    # Step 1: Check if wallet already exists for this BVN
-    logger.info(f"Checking for existing wallet with BVN: {bvn[:3]}***")
-    try:
-        existing_wallet = await wallet_api_client.get_wallet_by_bvn(bvn)
+    # Step 1: Check if wallet already exists for this BVN (if provided)
+    if bvn:
+        logger.info(f"Checking for existing wallet with BVN: {bvn[:3]}***")
+        try:
+            existing_wallet = await wallet_api_client.get_wallet_by_bvn(bvn)
         if existing_wallet:
             account_no = existing_wallet.get("accountNo") or existing_wallet.get("accountNumber")
             if account_no:
@@ -169,27 +171,39 @@ async def create_wallet(
                 }
         else:
             logger.info(f"No existing wallet found for BVN")
-    except WalletAPIError as e:
-        # If get_wallet_by_bvn fails, log and continue to creation
-        logger.info(f"BVN lookup failed: {str(e)}")
+        except WalletAPIError as e:
+            # If get_wallet_by_bvn fails, log and continue to creation
+            logger.info(f"BVN lookup failed: {str(e)}")
+    else:
+        existing_wallet = None
     
     # Step 2: Attempt to create new wallet
-    wallet_data = {
-        "bvn": bvn,
+    wallet_data: Dict[str, Any] = {
         "dateOfBirth": date_of_birth,
         "gender": str(gender),
         "lastName": last_name,
         "otherNames": other_names,
         "phoneNo": phone_no,
         "transactionTrackingRef": transaction_tracking_ref,
-        "accountName": account_name,
-        "placeOfBirth": place_of_birth,
         "address": address,
-        "nationalIdentityNo": national_identity_no,
-        "nextOfKinPhoneNo": next_of_kin_phone_no,
-        "nextOfKinName": next_of_kin_name,
         "email": email
     }
+    
+    # Only include optional fields if they have values
+    if bvn:
+        wallet_data["bvn"] = bvn
+    if account_name:
+        wallet_data["accountName"] = account_name
+    if place_of_birth:
+        wallet_data["placeOfBirth"] = place_of_birth
+    if national_identity_no:
+        wallet_data["nationalIdentityNo"] = national_identity_no
+    if nin_user_id:
+        wallet_data["ninUserId"] = nin_user_id
+    if next_of_kin_phone_no:
+        wallet_data["nextOfKinPhoneNo"] = next_of_kin_phone_no
+    if next_of_kin_name:
+        wallet_data["nextOfKinName"] = next_of_kin_name
     
     try:
         # Call third-party API

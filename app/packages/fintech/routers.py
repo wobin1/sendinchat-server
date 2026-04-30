@@ -71,6 +71,7 @@ async def create_wallet(request: CreateWalletRequest):
             place_of_birth=request.placeOfBirth,
             address=request.address,
             national_identity_no=request.nationalIdentityNo,
+            nin_user_id=request.ninUserId,
             next_of_kin_phone_no=request.nextOfKinPhoneNo,
             next_of_kin_name=request.nextOfKinName,
             email=request.email
@@ -147,6 +148,7 @@ async def onboard_wallet(
             place_of_birth=request.placeOfBirth,
             address=request.address,
             national_identity_no=request.nationalIdentityNo,
+            nin_user_id=request.ninUserId,
             next_of_kin_phone_no=request.nextOfKinPhoneNo,
             next_of_kin_name=request.nextOfKinName,
             email=request.email
