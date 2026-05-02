@@ -192,8 +192,7 @@ async def create_wallet(
     # Only include optional fields if they have values
     if bvn:
         wallet_data["bvn"] = bvn
-    if account_name:
-        wallet_data["accountName"] = account_name
+    wallet_data["accountName"] = account_name or f"{last_name} {other_names}"
     if place_of_birth:
         wallet_data["placeOfBirth"] = place_of_birth
     if national_identity_no:

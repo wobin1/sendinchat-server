@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, model_validator
+from pydantic import BaseModel, Field, EmailStr, model_validator, field_validator
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -14,7 +14,7 @@ class CreateWalletRequest(BaseModel):
     otherNames: str = Field(..., min_length=1, max_length=100)
     phoneNo: str = Field(..., pattern=r"^0\d{10}$", description="Phone number starting with 0 (11 digits)")
     transactionTrackingRef: str = Field(..., min_length=5)
-    accountName: Optional[str] = Field(None, min_length=1)
+    accountName: str = Field(..., min_length=1)
     placeOfBirth: Optional[str] = Field(None, min_length=1)
     address: str = Field(..., min_length=5)
     nationalIdentityNo: Optional[str] = Field(None, min_length=11, max_length=11, description="11-digit NIN (required if BVN not provided)")
@@ -22,6 +22,13 @@ class CreateWalletRequest(BaseModel):
     nextOfKinPhoneNo: Optional[str] = Field(None, pattern=r"^0\d{10}$", description="Next of kin phone number")
     nextOfKinName: Optional[str] = Field(None, min_length=1)
     email: EmailStr
++
++    @field_validator('bvn', 'nationalIdentityNo', 'ninUserId', mode='before')
++    @classmethod
++    def empty_str_to_none(cls, v):
++        if isinstance(v, str) and not v.strip():
++            return None
++        return v
 
     @model_validator(mode='after')
     def check_bvn_or_nin(self):
