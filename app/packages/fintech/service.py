@@ -134,43 +134,43 @@ async def create_wallet(
         logger.info(f"Checking for existing wallet with BVN: {bvn[:3]}***")
         try:
             existing_wallet = await wallet_api_client.get_wallet_by_bvn(bvn)
-        if existing_wallet:
-            account_no = existing_wallet.get("accountNo") or existing_wallet.get("accountNumber")
-            if account_no:
-                logger.info(f"Found existing wallet for BVN: {account_no}")
-                
-                # Store in mock DB if not exists
-                db = JsonDatabase.read()
-                if not any(w['accountNo'] == account_no for w in db['wallets']):
-                    wallet = {
+            if existing_wallet:
+                account_no = existing_wallet.get("accountNo") or existing_wallet.get("accountNumber")
+                if account_no:
+                    logger.info(f"Found existing wallet for BVN: {account_no}")
+                    
+                    # Store in mock DB if not exists
+                    db = JsonDatabase.read()
+                    if not any(w['accountNo'] == account_no for w in db['wallets']):
+                        wallet = {
+                            "accountNo": account_no,
+                            "accountName": account_name,
+                            "bvn": bvn,
+                            "dateOfBirth": date_of_birth,
+                            "gender": gender,
+                            "lastName": last_name,
+                            "otherNames": other_names,
+                            "phoneNo": phone_no,
+                            "email": email,
+                            "placeOfBirth": place_of_birth,
+                            "address": address,
+                            "nationalIdentityNo": national_identity_no,
+                            "nextOfKinPhoneNo": next_of_kin_phone_no,
+                            "nextOfKinName": next_of_kin_name,
+                            "balance": existing_wallet.get("balance", 0.0),
+                            "createdAt": datetime.utcnow().isoformat() + "Z"
+                        }
+                        db['wallets'].append(wallet)
+                        JsonDatabase.write(db)
+                    
+                    return {
                         "accountNo": account_no,
-                        "accountName": account_name,
+                        "accountName": existing_wallet.get("accountName", account_name),
                         "bvn": bvn,
-                        "dateOfBirth": date_of_birth,
-                        "gender": gender,
-                        "lastName": last_name,
-                        "otherNames": other_names,
-                        "phoneNo": phone_no,
-                        "email": email,
-                        "placeOfBirth": place_of_birth,
-                        "address": address,
-                        "nationalIdentityNo": national_identity_no,
-                        "nextOfKinPhoneNo": next_of_kin_phone_no,
-                        "nextOfKinName": next_of_kin_name,
-                        "balance": existing_wallet.get("balance", 0.0),
-                        "createdAt": datetime.utcnow().isoformat() + "Z"
+                        "balance": existing_wallet.get("balance", 0.0)
                     }
-                    db['wallets'].append(wallet)
-                    JsonDatabase.write(db)
-                
-                return {
-                    "accountNo": account_no,
-                    "accountName": existing_wallet.get("accountName", account_name),
-                    "bvn": bvn,
-                    "balance": existing_wallet.get("balance", 0.0)
-                }
-        else:
-            logger.info(f"No existing wallet found for BVN")
+            else:
+                logger.info(f"No existing wallet found for BVN")
         except WalletAPIError as e:
             # If get_wallet_by_bvn fails, log and continue to creation
             logger.info(f"BVN lookup failed: {str(e)}")
