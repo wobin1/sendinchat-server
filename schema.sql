@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     hashed_password VARCHAR(255) NOT NULL,
     wallet_account VARCHAR(20) UNIQUE,
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
+    last_seen TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

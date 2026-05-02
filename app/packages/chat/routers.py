@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 # Store active WebSocket connections: {chat_id: {(websocket, user_id), ...}}
 active_connections: Dict[int, Set[Tuple[WebSocket, int]]] = {}
+# Store global user connections: {user_id: {websocket, ...}}
+global_user_connections: Dict[int, Set[WebSocket]] = {}
 
 
 async def broadcast_to_chat(chat_id: int, message_data: dict):
@@ -43,6 +45,43 @@ async def broadcast_to_chat(chat_id: int, message_data: dict):
         active_connections[chat_id] -= disconnected
         if not active_connections[chat_id]:
             del active_connections[chat_id]
+ 
+ 
+async def broadcast_to_user(user_id: int, message_data: dict):
+    """
+    Broadcast a message to all active connections of a specific user.
+    Used for notifications across different chat rooms.
+    """
+    if user_id in global_user_connections:
+        disconnected = set()
+        for ws in global_user_connections[user_id]:
+            try:
+                await ws.send_json(message_data)
+            except:
+                disconnected.add(ws)
+        
+        # Clean up
+        global_user_connections[user_id] -= disconnected
+        if not global_user_connections[user_id]:
+            del global_user_connections[user_id]
+ 
+ 
+async def broadcast_user_status(user_id: int, username: str, is_online: bool, last_seen: str = None):
+    """
+    Broadcast a user's online/offline status to all their contacts.
+    """
+    status_data = {
+        "type": "user_status",
+        "user_id": user_id,
+        "username": username,
+        "status": "online" if is_online else "offline",
+        "last_seen": last_seen
+    }
+    
+    # In a real app, we'd only broadcast to contacts. 
+    # For now, we'll broadcast to everyone connected to any chat.
+    for chat_id in list(active_connections.keys()):
+        await broadcast_to_chat(chat_id, status_data)
 
 
 @router.websocket("/ws/{chat_id}")
@@ -81,6 +120,16 @@ async def websocket_endpoint(
     if chat_id not in active_connections:
         active_connections[chat_id] = set()
     active_connections[chat_id].add((websocket, user.id))
+    
+    # Add to global user connections
+    if user.id not in global_user_connections:
+        global_user_connections[user.id] = set()
+        # First connection for this user - mark as online
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE users SET last_seen = NULL WHERE id = $1", user.id)
+        await broadcast_user_status(user.id, user.username, True)
+        
+    global_user_connections[user.id].add(websocket)
     
     try:
         # Send welcome message
@@ -157,6 +206,23 @@ async def websocket_endpoint(
             }
             
             await broadcast_to_chat(chat_id, message_data)
+            
+            # Send notifications to other members who are online but not in this chat
+            async with pool.acquire() as conn:
+                members = await conn.fetch("SELECT user_id FROM chat_members WHERE chat_id = $1 AND user_id != $2", chat_id, user.id)
+                for member in members:
+                    member_id = member['user_id']
+                    # Check if member is connected globally but NOT to this specific chat
+                    is_in_chat = any(uid == member_id for _, uid in active_connections.get(chat_id, set()))
+                    if not is_in_chat and member_id in global_user_connections:
+                        notification_data = {
+                            "type": "new_message_notification",
+                            "chat_id": chat_id,
+                            "sender_username": user.username,
+                            "content": message_record["content"][:50] + ("..." if len(message_record["content"]) > 50 else "")
+                        }
+                        await broadcast_to_user(member_id, notification_data)
+
             logger.info(f"Message from {user.username} in chat {chat_id}: {data.get('content', '')}")
             
     except WebSocketDisconnect:
@@ -164,11 +230,23 @@ async def websocket_endpoint(
     except Exception as e:
         logger.error(f"WebSocket error for user {user.username} in chat {chat_id}: {str(e)}")
     finally:
-        # Remove connection
+        # Remove from active chat connections
         if chat_id in active_connections:
             active_connections[chat_id].discard((websocket, user.id))
             if not active_connections[chat_id]:
                 del active_connections[chat_id]
+        
+        # Remove from global user connections
+        if user.id in global_user_connections:
+            global_user_connections[user.id].discard(websocket)
+            if not global_user_connections[user.id]:
+                # Last connection closed - mark as offline
+                del global_user_connections[user.id]
+                now = datetime.utcnow()
+                async with pool.acquire() as conn:
+                    await conn.execute("UPDATE users SET last_seen = $1 WHERE id = $2", now, user.id)
+                await broadcast_user_status(user.id, user.username, False, now.isoformat())
+                
         logger.info(f"WebSocket connection closed for user {user.username} in chat {chat_id}")
 
 
