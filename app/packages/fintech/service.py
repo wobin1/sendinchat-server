@@ -81,8 +81,8 @@ async def create_wallet(
     other_names: str,
     phone_no: str,
     transaction_tracking_ref: str,
-    account_name: Optional[str],
-    place_of_birth: Optional[str],
+    account_name: str,
+    place_of_birth: str,
     address: str,
     national_identity_no: Optional[str],
     nin_user_id: Optional[str],
@@ -193,8 +193,7 @@ async def create_wallet(
     if bvn:
         wallet_data["bvn"] = bvn
     wallet_data["accountName"] = account_name or f"{last_name} {other_names}"
-    if place_of_birth:
-        wallet_data["placeOfBirth"] = place_of_birth
+    wallet_data["placeOfBirth"] = place_of_birth
     if national_identity_no:
         wallet_data["nationalIdentityNo"] = national_identity_no
     if nin_user_id:
