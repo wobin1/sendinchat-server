@@ -7,7 +7,7 @@ from datetime import datetime
 # ============= Wallet Creation =============
 class CreateWalletRequest(BaseModel):
     """Schema for wallet creation request."""
-    bvn: Optional[str] = Field(None, min_length=11, max_length=11, description="Bank Verification Number (required if NIN not provided)")
+    bvn: str | None = Field(default=None, min_length=11, max_length=11, description="Bank Verification Number (required if NIN not provided)")
     dateOfBirth: str = Field(..., pattern=r"^\d{2}/\d{2}/\d{4}$", description="Date of birth in DD/MM/YYYY format")
     gender: int = Field(..., ge=0, le=1, description="Gender: 0=Male, 1=Female")
     lastName: str = Field(..., min_length=1, max_length=50)
@@ -17,18 +17,18 @@ class CreateWalletRequest(BaseModel):
     accountName: str = Field(..., min_length=1)
     placeOfBirth: str = Field(..., min_length=1)
     address: str = Field(..., min_length=5, max_length=100)
-    nationalIdentityNo: Optional[str] = Field(None, min_length=11, max_length=11, description="11-digit NIN (required if BVN not provided)")
-    ninUserId: Optional[str] = Field(None, min_length=1, description="NIN User ID (required if NIN provided)")
-    nextOfKinPhoneNo: Optional[str] = Field(None, pattern=r"^0\d{10}$", description="Next of kin phone number")
-    nextOfKinName: Optional[str] = Field(None, min_length=1)
+    nationalIdentityNo: str | None = Field(default=None, min_length=11, max_length=11, description="11-digit NIN (required if BVN not provided)")
+    ninUserId: str | None = Field(default=None, min_length=1, description="NIN User ID (required if NIN provided)")
+    nextOfKinPhoneNo: str | None = Field(default=None, pattern=r"^0\d{10}$", description="Next of kin phone number")
+    nextOfKinName: str | None = Field(default=None, min_length=1)
     email: EmailStr
-+
-+    @field_validator('bvn', 'nationalIdentityNo', 'ninUserId', mode='before')
-+    @classmethod
-+    def empty_str_to_none(cls, v):
-+        if isinstance(v, str) and not v.strip():
-+            return None
-+        return v
+
+    @field_validator('bvn', 'nationalIdentityNo', 'ninUserId', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
     @model_validator(mode='after')
     def check_bvn_or_nin(self):
