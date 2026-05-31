@@ -114,7 +114,11 @@ async def initiate_transfer_in_chat(
         raise ValueError(f"You must create a wallet account before sending money")
     
     if not partner.get('wallet_account'):
-        raise ValueError(f"@{receiver_username} must create a wallet account before receiving money")
+        raise ValueError(
+            "CHAT_P2P_NO_RECIPIENT_WALLET:"
+            f"@{receiver_username} has not set up a SendChat wallet, so you cannot send money in chat. "
+            "To pay them via bank transfer, open Wallet → Send Money → Transfer to Bank."
+        )
         
     from app.packages.fintech import service as fintech_service
     

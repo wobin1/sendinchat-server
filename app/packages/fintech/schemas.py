@@ -114,6 +114,8 @@ class BankTransferResponse(BaseModel):
     amount: str
     recipientAccount: str
     recipientBank: str
+    transferStatus: str = "completed"  # completed | pending | failed
+    responseCode: Optional[str] = None
 
 
 # ============= Other Bank enquiry =============
@@ -125,11 +127,16 @@ class OtherBankEnquiryRequest(BaseModel):
 
 class ExternalTransferRequest(BaseModel):
     """Schema for external bank transfer from mobile."""
-    amount: float
-    recipientAccountNumber: str
+    amount: float = Field(..., gt=0)
+    recipientAccountNumber: str = Field(..., min_length=10, max_length=10)
     recipientName: str
     recipientBankCode: str
-    narration: str
+    narration: str = "Transfer from SendChat"
+    transactionReference: Optional[str] = Field(
+        None,
+        max_length=25,
+        description="Optional idempotent reference (max 25 chars)",
+    )
 
 
 # ============= Wallet Transfer (P2P) =============

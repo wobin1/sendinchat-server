@@ -301,9 +301,23 @@ async def initiate_transfer(
             }
         )
     except ValueError as e:
+        err_msg = str(e)
+        if err_msg.startswith("CHAT_P2P_NO_RECIPIENT_WALLET:"):
+            friendly = err_msg.split(":", 1)[1].strip()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "error",
+                    "message": friendly,
+                    "data": {
+                        "error_code": "CHAT_P2P_NO_RECIPIENT_WALLET",
+                        "use_wallet_bank_transfer": True,
+                    },
+                },
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e), "data": None}
+            detail={"status": "error", "message": err_msg, "data": None}
         )
 
 

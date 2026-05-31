@@ -180,14 +180,16 @@ async def onboard_wallet(
 
 # ============= 2. Bank Transfer =============
 @router.post("/transfer/bank", response_model=StandardBankTransferResponse, status_code=status.HTTP_200_OK)
-async def bank_transfer(request: BankTransferRequest):
+async def bank_transfer(
+    request: BankTransferRequest,
+    conn: asyncpg.Connection = Depends(get_connection),
+):
     """
-    Transfer funds to another bank.
-    
-    This endpoint processes inter-bank transfers.
+    Legacy inter-bank transfer (9PSB wallet_other_banks).
+    Prefer POST /fintech/transfer/external for mobile clients.
     """
     try:
-        result = fintech_service.bank_transfer(
+        result = await fintech_service.bank_transfer(
             sender_account=request.customer.account.senderaccountnumber,
             sender_name=request.customer.account.sendername,
             recipient_account=request.customer.account.number,
@@ -199,12 +201,19 @@ async def bank_transfer(request: BankTransferRequest):
             session_id=request.transaction.sessionId,
             merchant_fee_account=request.merchant.merchantFeeAccount if request.merchant else "",
             merchant_fee_amount=request.merchant.merchantFeeAmount if request.merchant else "0",
-            is_fee=request.merchant.isFee if request.merchant else False
+            is_fee=request.merchant.isFee if request.merchant else False,
+            conn=conn,
+        )
+        transfer_status = result.get("transferStatus", "completed")
+        message = (
+            "Bank transfer completed successfully"
+            if transfer_status == "completed"
+            else "Bank transfer is being processed"
         )
         return {
             "status": "success",
-            "message": "Bank transfer successful",
-            "data": BankTransferResponse(**result)
+            "message": message,
+            "data": BankTransferResponse(**result),
         }
     except ValueError as e:
         raise HTTPException(
@@ -222,42 +231,71 @@ async def bank_transfer(request: BankTransferRequest):
 @router.post("/transfer/external", response_model=StandardBankTransferResponse, status_code=status.HTTP_200_OK)
 async def transfer_external(
     request: ExternalTransferRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection),
 ):
     """
-    Transfer funds from user's wallet to another bank.
+    Transfer funds from the authenticated user's wallet to another bank (9PSB).
     """
     if not current_user.wallet_account:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"status": "error", "message": "User does not have a wallet account", "data": None}
         )
-    
+
+    sender_name = current_user.username or "SendChat User"
     try:
         result = await fintech_service.transfer_to_other_bank(
             sender_account_no=current_user.wallet_account,
+            sender_name=sender_name,
             amount=request.amount,
             recipient_account_no=request.recipientAccountNumber,
             recipient_name=request.recipientName,
             recipient_bank_code=request.recipientBankCode,
-            narration=request.narration
+            narration=request.narration,
+            transaction_reference=request.transactionReference,
+            conn=conn,
         )
-        # Transform result to BankTransferResponse
-        # API return usually includes transactionReference, etc.
-        data = result.get("data", {})
-        txn = data.get("transaction", {})
-        cust = data.get("customer", {})
-        
+
+        transfer_status = result.get("transferStatus", "completed")
+        response_code = result.get("responseCode")
+        data = result.get("data", {}) if isinstance(result.get("data"), dict) else {}
+        txn_ref = (
+            result.get("transactionReference")
+            or data.get("transactionReference")
+            or request.transactionReference
+            or "N/A"
+        )
+
+        if transfer_status == "completed":
+            message = "Transfer completed successfully"
+        elif transfer_status == "pending":
+            message = (
+                "Transfer is being processed. Check your transaction history shortly."
+            )
+        else:
+            message = fintech_service._other_bank_user_message(
+                result, "External transfer failed"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"status": "error", "message": message, "data": None},
+            )
+
         return {
             "status": "success",
-            "message": "External transfer initiated successfully",
-            "data": {
-                "transactionReference": txn.get("reference", "N/A"),
-                "amount": str(request.amount),
-                "recipientAccount": cust.get("accountNumber", request.recipientAccountNumber),
-                "recipientBank": cust.get("bankCode", request.recipientBankCode)
-            }
+            "message": message,
+            "data": BankTransferResponse(
+                transactionReference=str(txn_ref),
+                amount=str(request.amount),
+                recipientAccount=request.recipientAccountNumber,
+                recipientBank=request.recipientBankCode,
+                transferStatus=transfer_status,
+                responseCode=response_code,
+            ),
         }
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -540,7 +578,14 @@ async def get_banks():
     """
     try:
         result = await fintech_service.get_banks_api()
-        banks = [BankInfo(code=b.get("code"), name=b.get("name")) for b in result]
+        banks = [
+            BankInfo(
+                code=str(b.get("code") or b.get("bankCode") or ""),
+                name=str(b.get("name") or b.get("bankName") or ""),
+            )
+            for b in result
+            if b.get("code") or b.get("bankCode")
+        ]
         return {
             "status": "success",
             "message": "Bank list retrieved successfully",

@@ -12,8 +12,22 @@ import logging
 import asyncpg
 
 from app.packages.fintech.third_party_client import wallet_api_client, WalletAPIError
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# 9PSB wallet-to-other-bank response codes requiring TSQ (WAAS v3 section 1)
+OTHER_BANK_TSQ_CODES = frozenset({"09", "96", "97", "98", "99"})
+OTHER_BANK_SUCCESS_CODE = "00"
+
+OTHER_BANK_USER_MESSAGES = {
+    "51": "Insufficient funds in your wallet.",
+    "08": "Account name does not match. Please verify the recipient details.",
+    "61": "Transfer limit exceeded for your account tier.",
+    "91": "Beneficiary bank is currently unavailable. Try again later.",
+    "26": "Duplicate transaction reference. Check your transaction history.",
+    "42": "Duplicate transaction reference. Check your transaction history.",
+}
 
 # Path to JSON database
 DB_PATH = os.path.join(os.path.dirname(__file__), "mock_db.json")
@@ -70,6 +84,180 @@ def generate_reference() -> str:
     timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
     random_suffix = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
     return f"REF{timestamp}{random_suffix}"
+
+
+def normalize_transaction_reference(reference: Optional[str], prefix: str = "EXT") -> str:
+    """Normalize to 9PSB max 25-char alphanumeric reference."""
+    if reference:
+        clean = "".join(c for c in reference if c.isalnum() or c in "-_")[:25]
+        if clean:
+            return clean
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    suffix = "".join(str(secrets.randbelow(10)) for _ in range(4))
+    return f"{prefix}{ts}{suffix}"[:25]
+
+
+def _extract_other_bank_response_code(result: Dict[str, Any]) -> str:
+    if not isinstance(result, dict):
+        return ""
+    data = result.get("data")
+    if isinstance(data, dict):
+        code = data.get("responseCode") or data.get("code")
+        if code is not None:
+            return str(code).strip()
+    for key in ("responseCode", "code"):
+        if result.get(key) is not None:
+            return str(result[key]).strip()
+    return ""
+
+
+def _other_bank_status_from_result(result: Dict[str, Any]) -> str:
+    """Map 9PSB payload to completed | pending | failed."""
+    code = _extract_other_bank_response_code(result)
+    top_status = str(result.get("status", "")).upper()
+    if code == OTHER_BANK_SUCCESS_CODE or top_status == "SUCCESS":
+        return "completed"
+    if code in OTHER_BANK_TSQ_CODES or top_status == "PENDING":
+        return "pending"
+    return "failed"
+
+
+def _other_bank_user_message(result: Dict[str, Any], fallback: str) -> str:
+    code = _extract_other_bank_response_code(result)
+    if code in OTHER_BANK_USER_MESSAGES:
+        return OTHER_BANK_USER_MESSAGES[code]
+    msg = result.get("message")
+    if isinstance(msg, str) and msg.strip():
+        return msg.strip()
+    data = result.get("data")
+    if isinstance(data, dict):
+        inner = data.get("message") or data.get("responseMessage")
+        if isinstance(inner, str) and inner.strip():
+            return inner.strip()
+    return fallback
+
+
+async def _requery_other_bank_transfer(
+    transaction_reference: str,
+    amount: float,
+    sender_account_no: str,
+) -> Dict[str, Any]:
+    """TSQ for wallet-to-other-bank using wallet_requery."""
+    return await wallet_api_client.requery_transaction(
+        transaction_id=transaction_reference,
+        amount=amount,
+        transaction_type="OTHER_BANKS",
+        transaction_date=datetime.utcnow().strftime("%Y-%m-%d"),
+        account_no=sender_account_no,
+    )
+
+
+async def assert_sender_available_balance(
+    sender_account_no: str,
+    amount: float,
+    conn: Optional[asyncpg.Connection] = None,
+) -> float:
+    """
+    Ensure sender has enough available balance (API balance minus locally held funds).
+    Returns available balance after check.
+    """
+    wallet_data = await get_wallet_balance_api(sender_account_no)
+    api_balance = float(
+        wallet_data.get("availableBalance")
+        or wallet_data.get("balance")
+        or wallet_data.get("accountBalance")
+        or 0.0
+    )
+    locked = 0.0
+    if conn:
+        row = await conn.fetchrow(
+            "SELECT locked_balance FROM wallet_balances WHERE wallet_account = $1",
+            sender_account_no,
+        )
+        if row:
+            locked = float(row["locked_balance"])
+
+    available = api_balance - locked
+    if available < amount:
+        raise ValueError(
+            f"Insufficient balance. Available: {available:.2f}, "
+            f"Held for pending transfers: {locked:.2f}, Required: {amount:.2f}"
+        )
+    return available
+
+
+def _build_other_bank_transfer_payload(
+    sender_account_no: str,
+    sender_name: str,
+    amount: float,
+    recipient_account_no: str,
+    recipient_name: str,
+    recipient_bank_code: str,
+    narration: str,
+    transaction_reference: str,
+) -> Dict[str, Any]:
+    """Build wallet_other_banks request per WAAS v3."""
+    merchant_code = (
+        settings.WALLET_MERCHANT_SHORT_CODE.strip()
+        or settings.WALLET_API_CLIENT_ID.strip()
+        or "SENDCHAT"
+    )
+    return {
+        "transaction": {
+            "reference": transaction_reference,
+            "senderAccountNumber": sender_account_no,
+            "senderName": sender_name or "SendChat User",
+        },
+        "order": {
+            "amount": amount,
+            "currency": "NGN",
+            "description": (narration or "Transfer")[:100],
+        },
+        "customer": {
+            "accountNumber": recipient_account_no,
+            "bankCode": recipient_bank_code,
+            "accountName": recipient_name,
+        },
+        "merchant": {
+            "shortCode": merchant_code,
+        },
+        "transactionType": "OTHER_BANKS",
+        "narration": narration[:100],
+        "isFee": False,
+    }
+
+
+async def _finalize_other_bank_transfer(
+    transaction_reference: str,
+    amount: float,
+    sender_account_no: str,
+    initial_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply TSQ when response is ambiguous; return result with transferStatus."""
+    status = _other_bank_status_from_result(initial_result)
+    result = initial_result
+
+    if status == "pending":
+        try:
+            tsq = await _requery_other_bank_transfer(
+                transaction_reference, amount, sender_account_no
+            )
+            tsq_status = _other_bank_status_from_result(tsq)
+            if tsq_status == "completed":
+                result = tsq
+                status = "completed"
+            elif tsq_status == "failed":
+                result = tsq
+                status = "failed"
+            else:
+                status = "pending"
+        except Exception as e:
+            logger.warning(f"TSQ after ambiguous other-bank transfer failed: {e}")
+
+    result = dict(result) if isinstance(result, dict) else {"raw": result}
+    result["transferStatus"] = status
+    result["responseCode"] = _extract_other_bank_response_code(result)
+    return result
 
 
 # ============= 1. Create Wallet =============
@@ -373,8 +561,8 @@ async def create_wallet(
 
 
 
-# ============= 2. Bank Transfer =============
-def bank_transfer(
+# ============= 2. Bank Transfer (legacy route → 9PSB wallet_other_banks) =============
+async def bank_transfer(
     sender_account: str,
     sender_name: str,
     recipient_account: str,
@@ -386,60 +574,37 @@ def bank_transfer(
     session_id: str,
     merchant_fee_account: str,
     merchant_fee_amount: str,
-    is_fee: bool
+    is_fee: bool,
+    conn: Optional[asyncpg.Connection] = None,
 ) -> Dict[str, Any]:
     """
-    Transfer funds to another bank.
-    
-    Raises:
-        ValueError: If sender account not found or insufficient balance
+    Transfer funds to another bank via 9PSB wallet_other_banks.
+    Legacy /fintech/transfer/bank payload; prefer /fintech/transfer/external for apps.
     """
-    db = JsonDatabase.read()
-    
-    # Find sender wallet
-    sender_wallet = next((w for w in db['wallets'] if w['accountNo'] == sender_account), None)
-    if not sender_wallet:
-        raise ValueError(f"Sender account {sender_account} not found")
-    
-    # Convert amount to float
+    _ = (session_id, merchant_fee_account, merchant_fee_amount, is_fee)
     transfer_amount = float(amount)
-    fee_amount = float(merchant_fee_amount) if is_fee else 0.0
-    total_debit = transfer_amount + fee_amount
-    
-    # Check balance
-    if sender_wallet['balance'] < total_debit:
-        raise ValueError(f"Insufficient balance. Available: {sender_wallet['balance']}, Required: {total_debit}")
-    
-    # Deduct from sender
-    sender_wallet['balance'] -= total_debit
-    
-    # Create transaction record
-    transaction = {
-        "id": generate_transaction_id(),
-        "type": "bank_transfer",
-        "accountNo": sender_account,
-        "amount": -transfer_amount,
-        "fee": -fee_amount if is_fee else 0.0,
-        "narration": narration,
-        "reference": reference,
-        "sessionId": session_id,
-        "recipientAccount": recipient_account,
-        "recipientName": recipient_name,
-        "recipientBank": recipient_bank,
-        "status": "completed",
-        "createdAt": datetime.utcnow().isoformat() + "Z"
-    }
-    
-    db['transactions'].append(transaction)
-    JsonDatabase.write(db)
-    
-    logger.info(f"Bank transfer: {amount} from {sender_account} to {recipient_account} at bank {recipient_bank}")
-    
+    txn_ref = normalize_transaction_reference(reference or None, prefix="BNK")
+    result = await transfer_to_other_bank(
+        sender_account_no=sender_account,
+        sender_name=sender_name,
+        amount=transfer_amount,
+        recipient_account_no=recipient_account,
+        recipient_name=recipient_name,
+        recipient_bank_code=recipient_bank,
+        narration=narration,
+        transaction_reference=txn_ref,
+        conn=conn,
+    )
+    data = result.get("data", {}) if isinstance(result.get("data"), dict) else {}
+    txn = data.get("transaction", {})
+    cust = data.get("customer", {})
     return {
-        "transactionReference": reference,
-        "amount": amount,
-        "recipientAccount": recipient_account,
-        "recipientBank": recipient_bank
+        "transactionReference": txn.get("reference") or result.get("transactionReference") or txn_ref,
+        "amount": str(transfer_amount),
+        "recipientAccount": cust.get("accountNumber", recipient_account),
+        "recipientBank": cust.get("bankCode", recipient_bank),
+        "transferStatus": result.get("transferStatus", "completed"),
+        "responseCode": result.get("responseCode"),
     }
 
 
@@ -1458,7 +1623,12 @@ async def get_banks_api() -> List[Dict[str, Any]]:
     """Fetch list of all banks from third-party API."""
     try:
         result = await wallet_api_client.get_banks()
-        return result.get("data", [])
+        if isinstance(result, list):
+            return result
+        data = result.get("data", [])
+        if isinstance(data, list):
+            return data
+        return []
     except Exception as e:
         logger.error(f"Error fetching banks: {str(e)}")
         raise ValueError(f"Failed to fetch banks: {str(e)}")
@@ -1486,51 +1656,82 @@ async def transfer_to_other_bank(
     recipient_account_no: str,
     recipient_name: str,
     recipient_bank_code: str,
-    narration: str
+    narration: str,
+    sender_name: str = "",
+    transaction_reference: Optional[str] = None,
+    conn: Optional[asyncpg.Connection] = None,
 ) -> Dict[str, Any]:
-    """Transfer funds from wallet to another bank."""
-    transaction_id = generate_transaction_id()
-    transfer_data = {
-        "transaction": {
-            "transactionId": transaction_id,
-            "reference": generate_reference()
-        },
-        "order": {
-            "amount": str(amount),
-            "narration": narration
-        },
-        "customer": {
-            "accountNumber": recipient_account_no,
-            "accountName": recipient_name,
-            "bankCode": recipient_bank_code
-        },
-        "merchant": {
-            "merchantFirstName": "SendChat",
-            "merchantLastName": "Pay"
-        },
-        "transactionType": "OTHER_BANKS",
-        "narration": narration
-    }
+    """
+    Transfer funds from a 9PSB wallet to another bank (wallet_other_banks).
+    Runs balance check, calls 9PSB, TSQ on ambiguous codes, syncs local balance log.
+    """
+    if amount <= 0:
+        raise ValueError("Transfer amount must be greater than zero")
+
+    txn_ref = normalize_transaction_reference(transaction_reference, prefix="EXT")
+    await assert_sender_available_balance(sender_account_no, amount, conn)
+
+    transfer_data = _build_other_bank_transfer_payload(
+        sender_account_no=sender_account_no,
+        sender_name=sender_name,
+        amount=amount,
+        recipient_account_no=recipient_account_no,
+        recipient_name=recipient_name,
+        recipient_bank_code=recipient_bank_code,
+        narration=narration,
+        transaction_reference=txn_ref,
+    )
+
     try:
-        logger.info(f"!!! SENDING EXTERNAL TRANSFER PAYLOAD !!!: {json.dumps(transfer_data, indent=2)}")
-        result = await wallet_api_client.transfer_other_banks(transfer_data)
-        logger.info(f"!!! THIRD-PARTY EXTERNAL TRANSFER RESPONSE !!!: {json.dumps(result, indent=2)}")
-        
-        # Log locally as well
+        logger.info(f"External transfer payload: {json.dumps(transfer_data, indent=2)}")
+        initial = await wallet_api_client.transfer_other_banks(transfer_data)
+        logger.info(f"External transfer response: {json.dumps(initial, indent=2)}")
+
+        result = await _finalize_other_bank_transfer(
+            txn_ref, amount, sender_account_no, initial
+        )
+        transfer_status = result.get("transferStatus", "failed")
+
+        if transfer_status == "completed":
+            await get_wallet_balance_api(sender_account_no)
+        elif transfer_status == "failed":
+            msg = _other_bank_user_message(result, "Transfer to other bank failed")
+            raise ValueError(msg)
+
         db = JsonDatabase.read()
-        db['transactions'].append({
-            "id": transaction_id,
+        db["transactions"].append({
+            "id": txn_ref,
             "type": "external_transfer",
             "accountNo": sender_account_no,
             "amount": -amount,
             "recipientAccount": recipient_account_no,
+            "recipientName": recipient_name,
             "recipientBank": recipient_bank_code,
-            "status": "completed",
+            "status": transfer_status,
+            "reference": txn_ref,
+            "responseCode": result.get("responseCode"),
             "createdAt": datetime.utcnow().isoformat() + "Z",
-            "thirdPartyResponse": result
+            "thirdPartyResponse": result,
         })
         JsonDatabase.write(db)
+
+        result["transactionReference"] = txn_ref
         return result
+    except WalletAPIError as e:
+        logger.error(f"9PSB other bank transfer error: {e}")
+        if txn_ref:
+            try:
+                tsq = await _requery_other_bank_transfer(txn_ref, amount, sender_account_no)
+                if _other_bank_status_from_result(tsq) == "completed":
+                    tsq["transferStatus"] = "completed"
+                    tsq["transactionReference"] = txn_ref
+                    await get_wallet_balance_api(sender_account_no)
+                    return tsq
+            except Exception as tsq_err:
+                logger.warning(f"TSQ after API error failed: {tsq_err}")
+        raise ValueError(f"Transfer to other bank failed: {str(e)}")
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Error in other bank transfer: {str(e)}")
         raise ValueError(f"Transfer to other bank failed: {str(e)}")

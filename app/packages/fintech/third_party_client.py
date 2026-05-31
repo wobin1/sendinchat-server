@@ -533,43 +533,115 @@ class WalletAPIClient:
 
     async def transfer_other_banks(self, transfer_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Transfer from customer wallet to other bank.
-        
-        Args:
-            transfer_data: Transfer payload containing transaction, order, customer, etc.
-            
-        Returns:
-            Dict containing transfer response
-            
-        Raises:
-            WalletAPIError: If transfer fails
+        Transfer from customer wallet to other bank (wallet_other_banks).
+        Retries on network errors; TSQ on duplicate reference (42/26).
         """
-        headers = await self._get_auth_headers()
-        logger.info("Processing transfer to other bank")
-        
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/wallet_other_banks",
-                    json=transfer_data,
-                    headers=headers
-                )
-                
-                if response.status_code != 200:
+        txn_ref = ""
+        if isinstance(transfer_data.get("transaction"), dict):
+            txn_ref = transfer_data["transaction"].get("reference") or ""
+        sender_account = ""
+        if isinstance(transfer_data.get("transaction"), dict):
+            sender_account = transfer_data["transaction"].get("senderAccountNumber") or ""
+        amount = 0
+        order = transfer_data.get("order")
+        if isinstance(order, dict):
+            try:
+                amount = float(order.get("amount", 0))
+            except (TypeError, ValueError):
+                amount = 0
+
+        logger.info(f"Processing transfer to other bank: ref={txn_ref}")
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                headers = await self._get_auth_headers()
+                body = json.dumps(transfer_data).encode("utf-8")
+                headers["Content-Length"] = str(len(body))
+
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.post(
+                        f"{self.base_url}/wallet_other_banks",
+                        content=body,
+                        headers=headers,
+                    )
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        logger.info(f"Other bank transfer response (attempt {attempt + 1})")
+                        return data
+
                     error_detail = response.text
-                    logger.error(f"Other bank transfer failed: {response.status_code} - {error_detail}")
-                    raise WalletAPIError(f"Other bank transfer failed: {error_detail}")
-                
-                data = response.json()
-                logger.info("Other bank transfer request successful")
-                return data
-                
-        except httpx.RequestError as e:
-            logger.error(f"Network error during other bank transfer: {str(e)}")
-            raise WalletAPIError(f"Network error: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error during other bank transfer: {str(e)}")
-            raise WalletAPIError(f"Other bank transfer error: {str(e)}")
+                    logger.error(
+                        f"Other bank transfer failed (attempt {attempt + 1}): "
+                        f"{response.status_code} - {error_detail}"
+                    )
+
+                    try:
+                        error_json = response.json()
+                        error_data = error_json.get("data", {}) if isinstance(error_json, dict) else {}
+                        dup_code = str(
+                            error_data.get("responseCode") or error_json.get("responseCode") or ""
+                        )
+                        if dup_code in ("42", "26") and txn_ref and sender_account:
+                            logger.info(f"Duplicate ref {txn_ref}, running TSQ...")
+                            requery_result = await self.requery_transaction(
+                                transaction_id=txn_ref,
+                                amount=amount,
+                                transaction_type="OTHER_BANKS",
+                                transaction_date=datetime.now().strftime("%Y-%m-%d"),
+                                account_no=sender_account,
+                            )
+                            if isinstance(requery_result, dict) and (
+                                requery_result.get("status") == "SUCCESS"
+                                or str(requery_result.get("responseCode", "")) == "00"
+                            ):
+                                return requery_result
+                    except Exception as dup_err:
+                        logger.warning(f"Duplicate/TSQ handling failed: {dup_err}")
+
+                    if attempt == max_retries - 1:
+                        raise WalletAPIError(
+                            f"Other bank transfer failed: {error_detail}",
+                            status_code=response.status_code,
+                            response_text=error_detail,
+                        )
+
+            except httpx.RequestError as e:
+                last_error = e
+                logger.warning(f"Network error during other bank transfer (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+                    continue
+
+                if txn_ref and sender_account:
+                    try:
+                        requery_result = await self.requery_transaction(
+                            transaction_id=txn_ref,
+                            amount=amount,
+                            transaction_type="OTHER_BANKS",
+                            transaction_date=datetime.now().strftime("%Y-%m-%d"),
+                            account_no=sender_account,
+                        )
+                        if isinstance(requery_result, dict) and (
+                            requery_result.get("status") == "SUCCESS"
+                            or str(requery_result.get("responseCode", "")) == "00"
+                        ):
+                            return requery_result
+                    except Exception as re:
+                        logger.error(f"Final TSQ after network failure: {re}")
+
+                raise WalletAPIError(
+                    f"Network error during other bank transfer after {max_retries} attempts: {last_error}"
+                )
+            except WalletAPIError:
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error during other bank transfer: {str(e)}")
+                raise WalletAPIError(f"Other bank transfer error: {str(e)}")
+
+        raise WalletAPIError("Other bank transfer failed after retries")
 
     async def get_transaction_history(self, history_data: Dict[str, Any]) -> Dict[str, Any]:
         """
