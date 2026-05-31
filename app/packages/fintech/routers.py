@@ -10,7 +10,8 @@ from app.packages.fintech.schemas import (
     WalletTransferRequest, WalletTransferResponse,
     WalletEnquiryRequest, WalletEnquiryResponse,
     WalletTransactionsRequest, WalletTransactionsResponse,
-    WalletUpgradeRequest, WalletUpgradeResponse,
+    WalletUpgradeRequest, WalletUpgradeResponse, WalletUpgradePrefillResponse,
+    StandardWalletUpgradePrefillResponse,
     UpgradeStatusResponse, GetWalletByBVNResponse,
     InflowWebhookPayload, UpgradeStatusWebhookPayload, WebhookResponse,
     BankListResponse, BankInfo,
@@ -651,17 +652,51 @@ async def authenticate_client(request: ClientAuthRequest):
 # ============= Account Management =============
 
 # ============= 9. Wallet Upgrade =============
+@router.get("/wallet/upgrade-prefill", response_model=StandardWalletUpgradePrefillResponse, status_code=status.HTTP_200_OK)
+async def wallet_upgrade_prefill(current_user: User = Depends(get_current_user)):
+    """
+    Return upgrade form defaults from wallet registration data and live wallet enquiry.
+    """
+    if not current_user.wallet_account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "User does not have a wallet account", "data": None},
+        )
+    try:
+        prefill = await fintech_service.get_wallet_upgrade_prefill(current_user.wallet_account)
+        return {
+            "status": "success",
+            "message": "Upgrade prefill loaded",
+            "data": WalletUpgradePrefillResponse(**prefill),
+        }
+    except Exception as e:
+        logger.error(f"Upgrade prefill failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "error", "message": "Failed to load upgrade prefill", "data": None},
+        )
+
+
 @router.post("/wallet/upgrade", response_model=StandardWalletUpgradeResponse, status_code=status.HTTP_200_OK)
-async def upgrade_wallet(request: WalletUpgradeRequest):
+async def upgrade_wallet(
+    request: WalletUpgradeRequest,
+    current_user: User = Depends(get_current_user),
+):
     """
     Upgrade wallet account tier.
     
     This endpoint submits a request to upgrade the wallet from Tier 1 to Tier 2 or Tier 3.
     Requires additional KYC documents.
     """
+    if not current_user.wallet_account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "error", "message": "User does not have a wallet account", "data": None},
+        )
+
     try:
         result = await fintech_service.upgrade_wallet(
-            account_number=request.accountNumber,
+            account_number=current_user.wallet_account,
             bvn=request.bvn,
             nin=request.nin,
             account_name=request.accountName,

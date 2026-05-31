@@ -243,6 +243,27 @@ class BankListResponse(BaseModel):
 
 
 # ============= Account Upgrade =============
+class WalletUpgradePrefillResponse(BaseModel):
+    """Fields auto-filled from wallet registration / enquiry for tier upgrade."""
+    accountNumber: str
+    bvn: str = ""
+    nin: str = ""
+    accountName: str = ""
+    phoneNumber: str = ""
+    email: str = ""
+    placeOfBirth: str = ""
+    idType: int = 1
+    idNumber: str = ""
+    houseNumber: str = ""
+    streetName: str = ""
+    city: str = ""
+    state: str = ""
+    localGovernment: str = ""
+    suggestedTier: int = 2
+    pep: str = "NO"
+    prefilledFields: List[str] = []
+
+
 class WalletUpgradeRequest(BaseModel):
     """Schema for wallet account upgrade request."""
     accountNumber: str = Field(..., min_length=10, max_length=10, description="Wallet account number")
@@ -423,6 +444,13 @@ class StandardClientAuthResponse(BaseModel):
     status: str
     message: str
     data: Optional[ClientAuthResponse] = None
+
+
+class StandardWalletUpgradePrefillResponse(BaseModel):
+    """Standard response wrapper for upgrade form prefill."""
+    status: str
+    message: str
+    data: Optional[WalletUpgradePrefillResponse] = None
 
 
 class StandardWalletUpgradeResponse(BaseModel):

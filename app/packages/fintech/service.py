@@ -3,6 +3,7 @@ Fintech service layer - handles all fintech operations via third-party wallet AP
 """
 import json
 import os
+import re
 import threading
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
@@ -27,6 +28,16 @@ OTHER_BANK_USER_MESSAGES = {
     "91": "Beneficiary bank is currently unavailable. Try again later.",
     "26": "Duplicate transaction reference. Check your transaction history.",
     "42": "Duplicate transaction reference. Check your transaction history.",
+}
+
+# NIP name-enquiry codes (other_banks_enquiry uses top-level "code", not status SUCCESS)
+OTHER_BANK_ENQUIRY_MESSAGES = {
+    "96": (
+        "This account could not be verified on the banking network (NIP error 96). "
+        "Confirm the account number and bank, or contact 9PSB if external name enquiry "
+        "is enabled on your UAT merchant."
+    ),
+    "91": "Beneficiary bank is temporarily unavailable. Try again later.",
 }
 
 # Path to JSON database
@@ -611,6 +622,141 @@ async def bank_transfer(
 
 
 # ============= Account Management =============
+def _get_local_wallet_record(account_no: str) -> Optional[Dict[str, Any]]:
+    """KYC captured at wallet registration (mock_db / local store)."""
+    db = JsonDatabase.read()
+    for wallet in db.get("wallets", []):
+        if wallet.get("accountNo") == account_no:
+            return wallet
+    return None
+
+
+def _normalize_ng_phone(phone: str) -> str:
+    """Normalize to 11-digit Nigerian format starting with 0."""
+    digits = re.sub(r"\D", "", phone or "")
+    if len(digits) == 13 and digits.startswith("234"):
+        return "0" + digits[3:]
+    if len(digits) == 10:
+        return "0" + digits
+    if len(digits) == 11 and digits.startswith("0"):
+        return digits
+    return phone or ""
+
+
+def _parse_address_for_upgrade(address: str) -> Dict[str, str]:
+    """
+    Split registration address into upgrade address fields.
+    Expected registration format: free text, often comma-separated.
+    """
+    address = (address or "").strip()
+    if not address:
+        return {
+            "houseNumber": "",
+            "streetName": "",
+            "city": "",
+            "state": "",
+            "localGovernment": "",
+        }
+
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    if len(parts) >= 4:
+        return {
+            "houseNumber": parts[0],
+            "streetName": parts[1],
+            "city": parts[-2],
+            "state": parts[-1],
+            "localGovernment": parts[-2],
+        }
+    if len(parts) == 3:
+        return {
+            "houseNumber": parts[0],
+            "streetName": parts[1],
+            "city": parts[1],
+            "state": parts[2],
+            "localGovernment": parts[2],
+        }
+    if len(parts) == 2:
+        return {
+            "houseNumber": "",
+            "streetName": parts[0],
+            "city": parts[1],
+            "state": parts[1],
+            "localGovernment": parts[1],
+        }
+    tokens = address.split()
+    if len(tokens) >= 2:
+        return {
+            "houseNumber": tokens[0],
+            "streetName": " ".join(tokens[1:]),
+            "city": "",
+            "state": "",
+            "localGovernment": "",
+        }
+    return {
+        "houseNumber": "",
+        "streetName": address,
+        "city": "",
+        "state": "",
+        "localGovernment": "",
+    }
+
+
+async def get_wallet_upgrade_prefill(account_number: str) -> Dict[str, Any]:
+    """
+    Build upgrade form defaults from wallet registration data + live wallet enquiry.
+    Does not require new fields at registration — only reuses stored/API data.
+    """
+    local = _get_local_wallet_record(account_number) or {}
+
+    api_data: Dict[str, Any] = {}
+    try:
+        api_data = await get_wallet_balance_api(account_number) or {}
+    except Exception as e:
+        logger.warning(f"Upgrade prefill: wallet enquiry failed for {account_number}: {e}")
+
+    bvn = str(local.get("bvn") or api_data.get("bvn") or "").strip()
+    nin = str(local.get("nationalIdentityNo") or "").strip()
+    last_name = str(local.get("lastName") or "").strip()
+    other_names = str(local.get("otherNames") or "").strip()
+
+    account_name = (
+        str(local.get("accountName") or "").strip()
+        or str(api_data.get("name") or api_data.get("accountName") or "").strip()
+        or f"{last_name} {other_names}".strip()
+    )
+    phone_number = _normalize_ng_phone(
+        str(local.get("phoneNo") or api_data.get("phoneNo") or api_data.get("phoneNuber") or "")
+    )
+    email = str(local.get("email") or api_data.get("email") or "").strip()
+    place_of_birth = str(local.get("placeOfBirth") or "").strip()
+    address_parts = _parse_address_for_upgrade(str(local.get("address") or ""))
+
+    id_type = 1 if nin else 1
+    id_number = nin or bvn
+
+    prefill = {
+        "accountNumber": account_number,
+        "bvn": bvn,
+        "nin": nin,
+        "accountName": account_name,
+        "phoneNumber": phone_number,
+        "email": email,
+        "placeOfBirth": place_of_birth,
+        "idType": id_type,
+        "idNumber": id_number,
+        "houseNumber": address_parts["houseNumber"],
+        "streetName": address_parts["streetName"],
+        "city": address_parts["city"],
+        "state": address_parts["state"],
+        "localGovernment": address_parts["localGovernment"],
+        "suggestedTier": 2,
+        "pep": "NO",
+    }
+
+    prefill["prefilledFields"] = [k for k, v in prefill.items() if v and k not in ("accountNumber", "suggestedTier", "idType", "pep")]
+    return prefill
+
+
 async def upgrade_wallet(
     account_number: str,
     bvn: str,
@@ -653,7 +799,7 @@ async def upgrade_wallet(
         "nin": nin,
         "accountName": account_name,
         "phoneNumber": phone_number,
-        "tier": tier,
+        "tier": str(tier),
         "email": email,
         "userPhoto": user_photo,
         "idType": id_type,
@@ -1703,11 +1849,22 @@ def _normalize_bank_entry(entry: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """Map varied bank field names to code + name."""
     if not isinstance(entry, dict):
         return None
-    code = entry.get("code") or entry.get("bankCode") or entry.get("bank_code")
+    # NIP other_banks_enquiry expects the institution code NIBSS uses (not always CBN bankCode).
+    code = (
+        entry.get("nibssBankCode")
+        or entry.get("nibss_bank_code")
+        or entry.get("code")
+        or entry.get("bankCode")
+        or entry.get("bank_code")
+    )
     name = entry.get("name") or entry.get("bankName") or entry.get("bank_name")
     if not code or not name:
         return None
-    return {"code": str(code).strip(), "name": str(name).strip()}
+    code = str(code).strip()
+    # Drop corrupted entries from 9PSB list (newlines/quotes in code fields).
+    if not code or "\n" in code or code.startswith("'"):
+        return None
+    return {"code": code, "name": str(name).strip()}
 
 
 def _dedupe_banks(banks: List[Dict[str, str]]) -> List[Dict[str, str]]:
@@ -1885,7 +2042,10 @@ async def account_enquiry_other_bank(account_no: str, bank_code: str) -> Dict[st
 
         nip_code = _other_bank_enquiry_nip_code(result)
         if nip_code and nip_code not in ("00", "0"):
-            raise ValueError(str(result.get("message") or f"Account enquiry failed (code {nip_code})"))
+            raise ValueError(
+                OTHER_BANK_ENQUIRY_MESSAGES.get(nip_code)
+                or str(result.get("message") or f"Account enquiry failed (code {nip_code})")
+            )
 
         parsed = _parse_other_bank_enquiry_response(
             result, fallback_account_no=account_no, fallback_bank_code=bank_code
