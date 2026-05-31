@@ -1619,19 +1619,62 @@ async def complete_transfer_from_hold(
             await pool.release(conn)
 
 
+def _parse_banks_from_api_response(result: Any) -> List[Dict[str, Any]]:
+    """
+    Normalize 9PSB get_banks payloads into a list of bank dicts.
+    Live API may return data as an array, or as { banks: [...] }, etc.
+    """
+    if isinstance(result, list):
+        return result
+    if not isinstance(result, dict):
+        return []
+
+    data = result.get("data")
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("banks", "bankList", "items", "message"):
+            nested = data.get(key)
+            if isinstance(nested, list) and nested:
+                return nested
+
+    for key in ("banks", "bankList", "items"):
+        nested = result.get(key)
+        if isinstance(nested, list) and nested:
+            return nested
+
+    return []
+
+
+def _normalize_bank_entry(entry: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Map varied bank field names to code + name."""
+    if not isinstance(entry, dict):
+        return None
+    code = entry.get("code") or entry.get("bankCode") or entry.get("bank_code")
+    name = entry.get("name") or entry.get("bankName") or entry.get("bank_name")
+    if not code or not name:
+        return None
+    return {"code": str(code).strip(), "name": str(name).strip()}
+
+
 async def get_banks_api() -> List[Dict[str, Any]]:
-    """Fetch list of all banks from third-party API."""
+    """Fetch list of all banks from third-party API, with local fallback."""
     try:
         result = await wallet_api_client.get_banks()
-        if isinstance(result, list):
-            return result
-        data = result.get("data", [])
-        if isinstance(data, list):
-            return data
-        return []
+        logger.info(f"get_banks raw response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
+        raw_banks = _parse_banks_from_api_response(result)
+        banks = [b for b in (_normalize_bank_entry(x) for x in raw_banks) if b]
+
+        if banks:
+            logger.info(f"Parsed {len(banks)} banks from 9PSB")
+            return banks
+
+        logger.warning("9PSB get_banks returned no parseable banks; using local bank list")
+        return get_bank_list()["banks"]
     except Exception as e:
-        logger.error(f"Error fetching banks: {str(e)}")
-        raise ValueError(f"Failed to fetch banks: {str(e)}")
+        logger.error(f"Error fetching banks from 9PSB: {str(e)}")
+        logger.info("Falling back to local bank list")
+        return get_bank_list()["banks"]
 
 
 async def account_enquiry_other_bank(account_no: str, bank_code: str) -> Dict[str, Any]:

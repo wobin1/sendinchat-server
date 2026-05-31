@@ -586,26 +586,33 @@ async def get_banks():
             for b in result
             if b.get("code") or b.get("bankCode")
         ]
+        if not banks:
+            local = fintech_service.get_bank_list()
+            banks = [BankInfo(**b) for b in local["banks"]]
+            message = "Bank list retrieved successfully (local fallback)"
+        else:
+            message = "Bank list retrieved successfully"
         return {
             "status": "success",
-            "message": "Bank list retrieved successfully",
-            "data": BankListResponse(banks=banks, count=len(banks))
-        }
-    except Exception as e:
-        # Fallback to local
-        logger.warning(f"Bank list API failed, falling back to local: {str(e)}")
-        result = fintech_service.get_bank_list()
-        return {
-            "status": "success",
-            "message": "Bank list retrieved successfully (local)",
-            "data": BankListResponse(**result)
+            "message": message,
+            "data": BankListResponse(banks=banks, count=len(banks)),
         }
     except Exception as e:
         logger.error(f"Bank list retrieval failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Bank list retrieval failed", "data": None}
-        )
+        try:
+            local = fintech_service.get_bank_list()
+            banks = [BankInfo(**b) for b in local["banks"]]
+            return {
+                "status": "success",
+                "message": "Bank list retrieved successfully (local fallback)",
+                "data": BankListResponse(banks=banks, count=len(banks)),
+            }
+        except Exception as local_err:
+            logger.error(f"Local bank list fallback failed: {local_err}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"status": "error", "message": "Bank list retrieval failed", "data": None},
+            )
 
 
 # ============= 8. Client Authentication =============
