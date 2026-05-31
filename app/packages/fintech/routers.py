@@ -715,8 +715,15 @@ async def get_upgrade_status(accountNo: str):
         result = await fintech_service.get_upgrade_status(accountNo)
         return {
             "status": "success",
-            "message": "Upgrade status retrieved successfully",
-            "data": UpgradeStatusResponse(accountNumber=accountNo, **result)
+            "message": result.get("message", "Upgrade status retrieved successfully"),
+            "data": UpgradeStatusResponse(
+                accountNumber=accountNo,
+                message=result.get("message", ""),
+                status=result.get("status", "success"),
+                upgradeStatus=result.get("upgradeStatus"),
+                tier=result.get("tier"),
+                data=result.get("data"),
+            ),
         }
     except ValueError as e:
         raise HTTPException(

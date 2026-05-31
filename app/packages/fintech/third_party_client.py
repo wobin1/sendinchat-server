@@ -393,10 +393,31 @@ class WalletAPIClient:
                 
                 if response.status_code != 200:
                     error_detail = response.text
+                    if "no record" in error_detail.lower():
+                        logger.info(f"No upgrade record for account: {account_number}")
+                        return {
+                            "status": "SUCCESS",
+                            "message": "No upgrade request found",
+                            "data": {"message": "No record found", "status": "none"},
+                        }
                     logger.error(f"Upgrade status query failed: {response.status_code} - {error_detail}")
-                    raise WalletAPIError(f"Upgrade status query failed: {error_detail}")
-                
+                    raise WalletAPIError(
+                        f"Upgrade status query failed: {error_detail}",
+                        status_code=response.status_code,
+                        response_text=error_detail,
+                    )
+
                 data = response.json()
+                if isinstance(data, dict) and str(data.get("status", "")).upper() == "FAILED":
+                    inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+                    msg = str(inner.get("message") or data.get("message") or "").lower()
+                    if "no record" in msg:
+                        logger.info(f"No upgrade record for account: {account_number}")
+                        return {
+                            "status": "SUCCESS",
+                            "message": "No upgrade request found",
+                            "data": {"message": "No record found", "status": "none"},
+                        }
                 logger.info(f"Upgrade status retrieved: {account_number}")
                 return data
                 

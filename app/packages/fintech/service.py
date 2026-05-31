@@ -702,25 +702,76 @@ async def upgrade_wallet(
         raise ValueError(f"Wallet upgrade failed: {str(e)}")
 
 
+def _is_upgrade_not_found(payload: Any) -> bool:
+    """True when 9PSB has no upgrade request for this wallet (expected for tier-1 users)."""
+    if isinstance(payload, dict):
+        texts = [
+            str(payload.get("message", "")),
+            str(payload.get("status", "")),
+        ]
+        data = payload.get("data")
+        if isinstance(data, dict):
+            texts.append(str(data.get("message", "")))
+            texts.append(str(data.get("status", "")))
+        combined = " ".join(texts).lower()
+        if "no record" in combined:
+            return True
+    text = str(payload).lower()
+    return "no record found" in text or "no record" in text
+
+
 async def get_upgrade_status(account_number: str) -> Dict[str, Any]:
     """
     Get wallet upgrade status.
-    
-    Raises:
-        ValueError: If status query fails
-        WalletAPIError: If third-party API request fails
+    Returns upgradeStatus=None when the user has never submitted an upgrade request.
     """
     logger.info(f"Getting upgrade status for account: {account_number}")
-    
+
+    empty_status = {
+        "message": "No upgrade request found",
+        "status": "success",
+        "accountNumber": account_number,
+        "upgradeStatus": None,
+        "tier": None,
+        "data": None,
+    }
+
     try:
         result = await wallet_api_client.get_upgrade_status(account_number)
-        logger.info(f"Upgrade status retrieved: {account_number}")
-        return result
-        
+        if _is_upgrade_not_found(result):
+            logger.info(f"No upgrade record for account: {account_number}")
+            return empty_status
+
+        data = result.get("data", {}) if isinstance(result, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+
+        upgrade_status = (
+            data.get("status")
+            or data.get("upgradeStatus")
+            or result.get("upgradeStatus")
+        )
+        tier = data.get("tier") or result.get("tier")
+
+        logger.info(f"Upgrade status retrieved: {account_number} -> {upgrade_status}")
+        return {
+            "message": result.get("message", "Upgrade status retrieved"),
+            "status": "success",
+            "accountNumber": account_number,
+            "upgradeStatus": upgrade_status,
+            "tier": tier,
+            "data": data or None,
+        }
+
     except WalletAPIError as e:
+        if _is_upgrade_not_found(e.response_text or str(e)):
+            logger.info(f"No upgrade record for account (API error): {account_number}")
+            return empty_status
         logger.error(f"Third-party API error during upgrade status query: {str(e)}")
         raise ValueError(f"Upgrade status query failed: {str(e)}")
     except Exception as e:
+        if _is_upgrade_not_found(str(e)):
+            return empty_status
         logger.error(f"Unexpected error during upgrade status query: {str(e)}")
         raise ValueError(f"Upgrade status query failed: {str(e)}")
 
@@ -1657,6 +1708,20 @@ def _normalize_bank_entry(entry: Dict[str, Any]) -> Optional[Dict[str, str]]:
     return {"code": str(code).strip(), "name": str(name).strip()}
 
 
+def _dedupe_banks(banks: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """9PSB can return duplicate bank codes; keep first occurrence per code."""
+    seen: set[str] = set()
+    unique: List[Dict[str, str]] = []
+    for bank in banks:
+        code = bank["code"]
+        if code in seen:
+            continue
+        seen.add(code)
+        unique.append(bank)
+    unique.sort(key=lambda b: b["name"].lower())
+    return unique
+
+
 async def get_banks_api() -> List[Dict[str, Any]]:
     """Fetch list of all banks from third-party API, with local fallback."""
     try:
@@ -1664,17 +1729,18 @@ async def get_banks_api() -> List[Dict[str, Any]]:
         logger.info(f"get_banks raw response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
         raw_banks = _parse_banks_from_api_response(result)
         banks = [b for b in (_normalize_bank_entry(x) for x in raw_banks) if b]
+        banks = _dedupe_banks(banks)
 
         if banks:
-            logger.info(f"Parsed {len(banks)} banks from 9PSB")
+            logger.info(f"Parsed {len(banks)} unique banks from 9PSB (raw entries: {len(raw_banks)})")
             return banks
 
         logger.warning("9PSB get_banks returned no parseable banks; using local bank list")
-        return get_bank_list()["banks"]
+        return _dedupe_banks(get_bank_list()["banks"])
     except Exception as e:
         logger.error(f"Error fetching banks from 9PSB: {str(e)}")
         logger.info("Falling back to local bank list")
-        return get_bank_list()["banks"]
+        return _dedupe_banks(get_bank_list()["banks"])
 
 
 async def account_enquiry_other_bank(account_no: str, bank_code: str) -> Dict[str, Any]:
@@ -1792,6 +1858,18 @@ async def get_transactions_history_api(
     if not to_date:
         to_date = datetime.utcnow().strftime('%Y-%m-%d')
 
+    # 9PSB wallet_transactions allows at most ~31 days per request
+    try:
+        from_dt = datetime.strptime(from_date, '%Y-%m-%d')
+        to_dt = datetime.strptime(to_date, '%Y-%m-%d')
+        if (to_dt - from_dt).days > 30:
+            from_dt = to_dt - timedelta(days=30)
+            from_date = from_dt.strftime('%Y-%m-%d')
+            logger.info(f"Clamped transaction history fromDate to {from_date} (30-day API limit)")
+    except ValueError:
+        from_date = (datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d')
+        to_date = datetime.utcnow().strftime('%Y-%m-%d')
+
     history_data = {
         "accountNumber": account_number,
         "fromDate": from_date,
@@ -1826,7 +1904,8 @@ async def get_transactions_history_api(
         return []
     except Exception as e:
         logger.error(f"Error fetching transaction history: {str(e)}")
-        raise ValueError(f"Failed to fetch transaction history: {str(e)}")
+        # Return empty list so wallet UI still loads (history is non-critical)
+        return []
 
 
 async def get_wallet_balance_api(account_no: str) -> Dict[str, Any]:
