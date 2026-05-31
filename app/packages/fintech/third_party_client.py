@@ -529,18 +529,25 @@ class WalletAPIClient:
         logger.info(f"Performing account enquiry")
         
         try:
+            body = json.dumps(enquiry_data).encode("utf-8")
+            headers["Content-Length"] = str(len(body))
+
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/other_banks_enquiry",
-                    json=enquiry_data,
-                    headers=headers
+                    content=body,
+                    headers=headers,
                 )
-                
+
                 if response.status_code != 200:
                     error_detail = response.text
                     logger.error(f"Account enquiry failed: {response.status_code} - {error_detail}")
-                    raise WalletAPIError(f"Account enquiry failed: {error_detail}")
-                
+                    raise WalletAPIError(
+                        f"Account enquiry failed: {error_detail}",
+                        status_code=response.status_code,
+                        response_text=error_detail,
+                    )
+
                 data = response.json()
                 logger.info("Account enquiry successful")
                 return data

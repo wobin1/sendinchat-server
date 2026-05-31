@@ -214,9 +214,11 @@ def _build_other_bank_transfer_payload(
             "description": (narration or "Transfer")[:100],
         },
         "customer": {
-            "accountNumber": recipient_account_no,
-            "bankCode": recipient_bank_code,
-            "accountName": recipient_name,
+            "account": {
+                "number": recipient_account_no,
+                "bank": recipient_bank_code,
+                "name": recipient_name,
+            },
         },
         "merchant": {
             "shortCode": merchant_code,
@@ -1743,17 +1745,75 @@ async def get_banks_api() -> List[Dict[str, Any]]:
         return _dedupe_banks(get_bank_list()["banks"])
 
 
+def _build_other_bank_enquiry_payload(account_no: str, bank_code: str) -> Dict[str, Any]:
+    """
+    Build other_banks_enquiry payload for 9PSB.
+    Live API expects customer.account (number + bank), not flat accountNumber.
+    """
+    account_no = str(account_no).strip()
+    bank_code = str(bank_code).strip()
+    return {
+        "customer": {
+            "account": {
+                "number": account_no,
+                "bank": bank_code,
+            },
+        },
+    }
+
+
+def _parse_other_bank_enquiry_response(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize name enquiry response fields."""
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data", {})
+    if not isinstance(data, dict):
+        data = {}
+
+    account_name = (
+        data.get("accountName")
+        or data.get("name")
+        or result.get("accountName")
+    )
+    account_number = (
+        data.get("accountNumber")
+        or data.get("number")
+        or data.get("account")
+    )
+    bank_code = data.get("bankCode") or data.get("bank")
+    bank_name = data.get("bankName")
+
+    return {
+        "accountName": account_name,
+        "accountNumber": account_number,
+        "bankCode": bank_code,
+        "bankName": bank_name,
+    }
+
+
 async def account_enquiry_other_bank(account_no: str, bank_code: str) -> Dict[str, Any]:
     """Verify details of an account in another bank."""
-    enquiry_data = {
-        "customer": {
-            "accountNumber": account_no,
-            "bankCode": bank_code
-        }
-    }
+    if not account_no or len(str(account_no).strip()) != 10:
+        raise ValueError("Account number must be 10 digits")
+    if not bank_code:
+        raise ValueError("Bank code is required")
+
+    enquiry_data = _build_other_bank_enquiry_payload(account_no, bank_code)
     try:
+        logger.info(f"Other bank enquiry payload: {json.dumps(enquiry_data)}")
         result = await wallet_api_client.account_enquiry(enquiry_data)
-        return result.get("data", {})
+        logger.info(f"Other bank enquiry response: {json.dumps(result) if isinstance(result, dict) else result}")
+
+        if isinstance(result, dict) and str(result.get("status", "")).upper() == "FAILED":
+            msg = result.get("message") or result.get("data", {}).get("message") if isinstance(result.get("data"), dict) else "Account enquiry failed"
+            raise ValueError(str(msg))
+
+        parsed = _parse_other_bank_enquiry_response(result)
+        if not parsed.get("accountName"):
+            raise ValueError("Could not resolve account name for this account number")
+        return parsed
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Error in account enquiry: {str(e)}")
         raise ValueError(f"Account enquiry failed: {str(e)}")

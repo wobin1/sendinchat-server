@@ -323,12 +323,14 @@ async def other_bank_enquiry(request: OtherBankEnquiryRequest):
             "status": "success",
             "message": "Account enquiry successful",
             "data": {
-                "accountNo": result.get("accountNumber"),
+                "accountNo": result.get("accountNumber") or request.accountNumber,
                 "accountName": result.get("accountName"),
-                "balance": 0.0,  # Other bank enquiry doesn't return balance usually
+                "balance": 0.0,
                 "phoneNo": "",
-                "email": ""
-            }
+                "email": "",
+                "bankCode": result.get("bankCode") or request.bankCode,
+                "bankName": result.get("bankName"),
+            },
         }
     except ValueError as e:
         raise HTTPException(
