@@ -552,6 +552,8 @@ class WalletAPIClient:
                 logger.info("Account enquiry successful")
                 return data
                 
+        except WalletAPIError:
+            raise
         except httpx.RequestError as e:
             logger.error(f"Network error during account enquiry: {str(e)}")
             raise WalletAPIError(f"Network error: {str(e)}")

@@ -1745,28 +1745,19 @@ async def get_banks_api() -> List[Dict[str, Any]]:
         return _dedupe_banks(get_bank_list()["banks"])
 
 
-def _other_bank_enquiry_payload_variants(account_no: str, bank_code: str) -> List[Dict[str, Any]]:
-    """Payload shapes seen across 9PSB WAAS versions / Postman collections."""
-    account_no = str(account_no).strip()
-    bank_code = str(bank_code).strip()
-    return [
-        {
-            "customer": {
-                "account": {"number": account_no, "bank": bank_code},
+def _build_other_bank_enquiry_payload(account_no: str, bank_code: str) -> Dict[str, Any]:
+    """
+    9PSB other_banks_enquiry (live UAT).
+    Requires customer.account as an object with number + bank (not bankCode, not flat accountNumber).
+    """
+    return {
+        "customer": {
+            "account": {
+                "number": str(account_no).strip(),
+                "bank": str(bank_code).strip(),
             },
         },
-        {
-            "customer": {
-                "accountNumber": account_no,
-                "bankCode": bank_code,
-            },
-        },
-        {
-            "customer": {
-                "account": {"number": account_no, "bankCode": bank_code},
-            },
-        },
-    ]
+    }
 
 
 def _deep_find_string(obj: Any, keys: tuple) -> Optional[str]:
@@ -1799,6 +1790,8 @@ def _parse_other_bank_enquiry_response(
 
     data = result.get("data")
     account_name: Optional[str] = None
+    account_number: Optional[str] = None
+    bank_code: Optional[str] = None
 
     # Some environments return the name as a plain string in data
     if isinstance(data, str) and data.strip():
@@ -1828,9 +1821,23 @@ def _parse_other_bank_enquiry_response(
             if "enquiry" not in lower and "successful" not in lower:
                 account_name = msg_val.strip()
 
+    # Live UAT shape: { "customer": { "account": { "name": "...", "number": "..." } }, "code": "00" }
+    customer = result.get("customer")
+    if isinstance(customer, dict):
+        acct = customer.get("account")
+        if isinstance(acct, dict):
+            if not account_name and acct.get("name"):
+                account_name = str(acct["name"]).strip()
+            if not account_number and acct.get("number"):
+                account_number = str(acct["number"]).strip()
+            if not bank_code and acct.get("bank"):
+                bank_code = str(acct["bank"]).strip()
+
     number_keys = ("accountNumber", "account_number", "number", "accountNo", "nuban")
-    account_number = _deep_find_string(result, number_keys) or fallback_account_no
-    bank_code = _deep_find_string(result, ("bankCode", "bank_code", "bank")) or fallback_bank_code
+    if not account_number:
+        account_number = _deep_find_string(result, number_keys) or fallback_account_no
+    if not bank_code:
+        bank_code = _deep_find_string(result, ("bankCode", "bank_code", "bank")) or fallback_bank_code
     bank_name = _deep_find_string(result, ("bankName", "bank_name"))
 
     return {
@@ -1841,16 +1848,13 @@ def _parse_other_bank_enquiry_response(
     }
 
 
-def _is_enquiry_api_success(result: Dict[str, Any]) -> bool:
-    if not isinstance(result, dict):
-        return False
-    status = str(result.get("status", "")).upper()
-    code = str(result.get("statusCode") or result.get("responseCode") or "").strip()
-    if status in ("SUCCESS", "PENDING", "APPROVED", "COMPLETED"):
-        return True
-    if code in ("00", "0"):
-        return True
-    return False
+def _other_bank_enquiry_nip_code(result: Dict[str, Any]) -> str:
+    return str(
+        result.get("code")
+        or result.get("statusCode")
+        or result.get("responseCode")
+        or ""
+    ).strip()
 
 
 async def account_enquiry_other_bank(account_no: str, bank_code: str) -> Dict[str, Any]:
@@ -1863,51 +1867,42 @@ async def account_enquiry_other_bank(account_no: str, bank_code: str) -> Dict[st
     if not bank_code:
         raise ValueError("Bank code is required")
 
-    last_error = "Account enquiry failed"
-    variants = _other_bank_enquiry_payload_variants(account_no, bank_code)
+    enquiry_data = _build_other_bank_enquiry_payload(account_no, bank_code)
+    try:
+        logger.info(f"Other bank enquiry payload: {json.dumps(enquiry_data)}")
+        result = await wallet_api_client.account_enquiry(enquiry_data)
+        logger.info(
+            f"Other bank enquiry response: "
+            f"{json.dumps(result) if isinstance(result, dict) else result}"
+        )
 
-    for idx, enquiry_data in enumerate(variants):
-        try:
-            logger.info(f"Other bank enquiry attempt {idx + 1}: {json.dumps(enquiry_data)}")
-            result = await wallet_api_client.account_enquiry(enquiry_data)
-            logger.info(
-                f"Other bank enquiry response {idx + 1}: "
-                f"{json.dumps(result) if isinstance(result, dict) else result}"
+        if not isinstance(result, dict):
+            raise ValueError("Invalid response from account enquiry provider")
+
+        if str(result.get("status", "")).upper() == "FAILED":
+            data = result.get("data") if isinstance(result.get("data"), dict) else {}
+            raise ValueError(str(data.get("message") or result.get("message") or "Account enquiry failed"))
+
+        nip_code = _other_bank_enquiry_nip_code(result)
+        if nip_code and nip_code not in ("00", "0"):
+            raise ValueError(str(result.get("message") or f"Account enquiry failed (code {nip_code})"))
+
+        parsed = _parse_other_bank_enquiry_response(
+            result, fallback_account_no=account_no, fallback_bank_code=bank_code
+        )
+        if not parsed.get("accountName"):
+            raise ValueError(
+                "Could not resolve account name for this account number. "
+                "Confirm the account exists and the bank code matches get_banks."
             )
-
-            if not isinstance(result, dict):
-                continue
-
-            if str(result.get("status", "")).upper() == "FAILED":
-                data = result.get("data") if isinstance(result.get("data"), dict) else {}
-                last_error = str(
-                    data.get("message") or result.get("message") or "Account enquiry failed"
-                )
-                continue
-
-            if not _is_enquiry_api_success(result):
-                last_error = str(result.get("message") or "Account enquiry failed")
-                continue
-
-            parsed = _parse_other_bank_enquiry_response(
-                result, fallback_account_no=account_no, fallback_bank_code=bank_code
-            )
-            if parsed.get("accountName"):
-                return parsed
-
-            last_error = "Could not resolve account name from provider response"
-        except WalletAPIError as e:
-            last_error = str(e)
-            if "account is required" in last_error.lower() and idx < len(variants) - 1:
-                continue
-            raise ValueError(f"Account enquiry failed: {last_error}") from e
-        except ValueError:
-            raise
-        except Exception as e:
-            logger.error(f"Error in account enquiry attempt {idx + 1}: {str(e)}")
-            last_error = str(e)
-
-    raise ValueError(last_error)
+        return parsed
+    except ValueError:
+        raise
+    except WalletAPIError as e:
+        raise ValueError(f"Account enquiry failed: {e}") from e
+    except Exception as e:
+        logger.error(f"Error in account enquiry: {str(e)}")
+        raise ValueError(f"Account enquiry failed: {str(e)}")
 
 
 async def transfer_to_other_bank(
