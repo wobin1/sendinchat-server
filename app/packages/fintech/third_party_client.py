@@ -572,6 +572,12 @@ class WalletAPIClient:
         sender_account = ""
         if isinstance(transfer_data.get("transaction"), dict):
             sender_account = transfer_data["transaction"].get("senderAccountNumber") or ""
+        if not sender_account:
+            customer = transfer_data.get("customer")
+            if isinstance(customer, dict):
+                account = customer.get("account")
+                if isinstance(account, dict):
+                    sender_account = account.get("senderaccountnumber") or ""
         amount = 0
         order = transfer_data.get("order")
         if isinstance(order, dict):

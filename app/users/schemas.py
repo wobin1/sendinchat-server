@@ -55,6 +55,12 @@ class UserPinVerify(BaseModel):
     pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
 
 
+class UserPinChange(BaseModel):
+    """Schema for changing a transaction PIN."""
+    current_pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
+    new_pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
 class UserPinStatusResponse(BaseModel):
     """Schema for PIN status response."""
     has_pin: bool

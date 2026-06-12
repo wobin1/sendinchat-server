@@ -6,7 +6,7 @@ import logging
 
 from app.db.database import get_connection
 from app.users.models import User
-from app.users.schemas import UserCreate, UserOut, Token, UserResponse, TokenResponse, UserPinSet, UserPinVerify
+from app.users.schemas import UserCreate, UserOut, Token, UserResponse, TokenResponse, UserPinSet, UserPinVerify, UserPinChange
 from app.users import service as user_service
 from app.users import contacts_service
 from app.core.security import create_access_token, verify_token
@@ -186,7 +186,7 @@ async def verify_pin(
     
     if not is_valid:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "status": "error",
                 "message": "Invalid transaction PIN",
@@ -202,6 +202,60 @@ async def verify_pin(
         "message": "PIN verified successfully",
         "data": user_out
     }
+
+
+@router.post("/pin/change", response_model=UserResponse)
+async def change_pin(
+    pin_data: UserPinChange,
+    current_user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_connection)
+):
+    """Change transaction PIN (requires current PIN)."""
+    if pin_data.current_pin == pin_data.new_pin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": "New PIN must be different from current PIN",
+                "data": None
+            }
+        )
+
+    is_valid = await user_service.verify_transaction_pin(
+        conn=conn,
+        user_id=current_user.id,
+        pin=pin_data.current_pin
+    )
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": "Current PIN is incorrect",
+                "data": None
+            }
+        )
+
+    try:
+        success = await user_service.set_transaction_pin(
+            conn=conn,
+            user_id=current_user.id,
+            pin=pin_data.new_pin
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to change PIN")
+
+        updated_user = await user_service.get_user_by_id(conn, current_user.id)
+        user_out = UserOut.from_orm(updated_user)
+        user_out.has_pin = True
+
+        return {
+            "status": "success",
+            "message": "Transaction PIN changed successfully",
+            "data": user_out
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/pin/status")

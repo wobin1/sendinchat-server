@@ -206,37 +206,42 @@ def _build_other_bank_transfer_payload(
     recipient_bank_code: str,
     narration: str,
     transaction_reference: str,
+    is_fee: bool = False,
 ) -> Dict[str, Any]:
-    """Build wallet_other_banks request per WAAS v3."""
-    merchant_code = (
-        settings.WALLET_MERCHANT_SHORT_CODE.strip()
-        or settings.WALLET_API_CLIENT_ID.strip()
-        or "SENDCHAT"
-    )
+    """Build wallet_other_banks request per 9PSB legacy WAAS format."""
+    resolved_sender_name = (sender_name or "SendChat User").strip()
+    description = (narration or "Transfer")[:100]
     return {
-        "transaction": {
-            "reference": transaction_reference,
-            "senderAccountNumber": sender_account_no,
-            "senderName": sender_name or "SendChat User",
-        },
-        "order": {
-            "amount": amount,
-            "currency": "NGN",
-            "description": (narration or "Transfer")[:100],
-        },
+        "senderName": resolved_sender_name,
         "customer": {
             "account": {
-                "number": recipient_account_no,
                 "bank": recipient_bank_code,
                 "name": recipient_name,
+                "number": recipient_account_no,
+                "senderaccountnumber": sender_account_no,
+                "sendername": resolved_sender_name,
             },
         },
+        "narration": description,
+        "order": {
+            "amount": str(amount),
+            "country": "NG",
+            "currency": "NGN",
+            "description": description,
+        },
+        "transaction": {
+            "reference": transaction_reference,
+            "sessionId": transaction_reference,
+            "senderAccountNumber": sender_account_no,
+            "senderName": resolved_sender_name,
+        },
         "merchant": {
-            "shortCode": merchant_code,
+            "isFee": is_fee,
+            "merchantFeeAccount": "",
+            "merchantFeeAmount": "0",
         },
         "transactionType": "OTHER_BANKS",
-        "narration": narration[:100],
-        "isFee": False,
+        "isFee": is_fee,
     }
 
 
@@ -757,6 +762,74 @@ async def get_wallet_upgrade_prefill(account_number: str) -> Dict[str, Any]:
     return prefill
 
 
+def _build_ninepsb_upgrade_payload(
+    *,
+    account_number: str,
+    bvn: str,
+    nin: str,
+    account_name: str,
+    phone_number: str,
+    tier: int,
+    email: str,
+    user_photo: str,
+    id_type: int,
+    id_number: str,
+    id_issue_date: str,
+    id_expiry_date: Optional[str],
+    id_card_front: str,
+    id_card_back: Optional[str],
+    house_number: str,
+    street_name: str,
+    state: str,
+    city: str,
+    local_government: str,
+    pep: str,
+    customer_signature: str,
+    utility_bill: str,
+    nearest_landmark: str,
+    place_of_birth: Optional[str],
+    proof_of_address_verification: Optional[str],
+) -> Dict[str, Any]:
+    """
+    Build wallet_upgrade body exactly as 9PSB WAAS expects (no extra null keys).
+    Matches successful sandbox shape: tier/idType as strings; optional fields omitted when empty.
+    """
+    payload: Dict[str, Any] = {
+        "accountNumber": account_number,
+        "bvn": bvn,
+        "nin": nin,
+        "accountName": account_name,
+        "phoneNumber": phone_number,
+        "tier": str(tier),
+        "email": email,
+        "userPhoto": user_photo,
+        "idType": str(id_type),
+        "idNumber": id_number,
+        "idIssueDate": id_issue_date,
+        "idCardFront": id_card_front,
+        "houseNumber": house_number,
+        "streetName": street_name,
+        "state": state,
+        "city": city,
+        "localGovernment": local_government,
+        "pep": pep,
+        "customerSignature": customer_signature,
+        "utilityBill": utility_bill,
+        "nearestLandmark": nearest_landmark,
+    }
+
+    if id_expiry_date and str(id_expiry_date).strip():
+        payload["idExpiryDate"] = str(id_expiry_date).strip()
+    if id_card_back and str(id_card_back).strip():
+        payload["idCardBack"] = str(id_card_back).strip()
+    if place_of_birth and str(place_of_birth).strip():
+        payload["placeOfBirth"] = str(place_of_birth).strip()
+    if tier >= 3 and proof_of_address_verification and str(proof_of_address_verification).strip():
+        payload["proofOfAddressVerification"] = str(proof_of_address_verification).strip()
+
+    return payload
+
+
 async def upgrade_wallet(
     account_number: str,
     bvn: str,
@@ -792,35 +865,38 @@ async def upgrade_wallet(
         WalletAPIError: If third-party API request fails
     """
     logger.info(f"Processing wallet upgrade for account: {account_number}")
-    
-    upgrade_data = {
-        "accountNumber": account_number,
-        "bvn": bvn,
-        "nin": nin,
-        "accountName": account_name,
-        "phoneNumber": phone_number,
-        "tier": str(tier),
-        "email": email,
-        "userPhoto": user_photo,
-        "idType": id_type,
-        "idNumber": id_number,
-        "idIssueDate": id_issue_date,
-        "idExpiryDate": id_expiry_date,
-        "idCardFront": id_card_front,
-        "idCardBack": id_card_back,
-        "houseNumber": house_number,
-        "streetName": street_name,
-        "state": state,
-        "city": city,
-        "localGovernment": local_government,
-        "pep": pep,
-        "customerSignature": customer_signature,
-        "utilityBill": utility_bill,
-        "nearestLandmark": nearest_landmark,
-        "placeOfBirth": place_of_birth,
-        "proofOfAddressVerification": proof_of_address_verification
-    }
-    
+
+    upgrade_data = _build_ninepsb_upgrade_payload(
+        account_number=account_number,
+        bvn=bvn,
+        nin=nin,
+        account_name=account_name,
+        phone_number=phone_number,
+        tier=tier,
+        email=email,
+        user_photo=user_photo,
+        id_type=id_type,
+        id_number=id_number,
+        id_issue_date=id_issue_date,
+        id_expiry_date=id_expiry_date,
+        id_card_front=id_card_front,
+        id_card_back=id_card_back,
+        house_number=house_number,
+        street_name=street_name,
+        state=state,
+        city=city,
+        local_government=local_government,
+        pep=pep,
+        customer_signature=customer_signature,
+        utility_bill=utility_bill,
+        nearest_landmark=nearest_landmark,
+        place_of_birth=place_of_birth,
+        proof_of_address_verification=proof_of_address_verification,
+    )
+    logger.info(
+        f"9PSB wallet_upgrade payload keys for {account_number}: {list(upgrade_data.keys())}"
+    )
+
     try:
         result = await wallet_api_client.upgrade_wallet(upgrade_data)
         
