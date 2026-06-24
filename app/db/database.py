@@ -1,5 +1,6 @@
 import asyncpg
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 from app.core.config import settings
 
 # Global connection pool
@@ -10,11 +11,16 @@ async def get_pool() -> asyncpg.Pool:
     """Get the database connection pool."""
     global pool
     if pool is None:
-        # Ensure SSL is configured for Neon PostgreSQL
-        import ssl
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        parsed_url = urlparse(settings.DATABASE_URL)
+        hostname = (parsed_url.hostname or "").lower()
+
+        # Only force SSL for remote databases. Local Postgres commonly rejects SSL.
+        ssl_context = None
+        if hostname not in {"localhost", "127.0.0.1", "::1"}:
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
         
         pool = await asyncpg.create_pool(
             settings.DATABASE_URL,
