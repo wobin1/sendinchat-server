@@ -2,7 +2,7 @@
     "info": {
         "_postman_id": "fintech-api-collection",
         "name": "SendInChat - Fintech API",
-        "description": "Complete testing flow for all 8 fintech endpoints",
+        "description": "Complete testing flow for fintech endpoints including wallet webhooks (Basic Auth)",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "item": [
@@ -226,12 +226,289 @@
                 "description": "Retrieve transaction history for a wallet within a date range."
             },
             "response": []
+        },
+        {
+            "name": "9. Webhooks",
+            "description": "Incoming wallet-provider webhooks. Requires HTTP Basic Auth using `webhook_username` and `webhook_password` collection variables (set from your `.env`). Share `/fintech/webhooks/notification` as the canonical URL with the provider.",
+            "auth": {
+                "type": "basic",
+                "basic": [
+                    {
+                        "key": "username",
+                        "value": "{{webhook_username}}",
+                        "type": "string"
+                    },
+                    {
+                        "key": "password",
+                        "value": "{{webhook_password}}",
+                        "type": "string"
+                    }
+                ]
+            },
+            "item": [
+                {
+                    "name": "9a. Wallet Notification (canonical)",
+                    "request": {
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{webhook_username}}",
+                                    "type": "string"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{webhook_password}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"eventType\": \"inflow\",\n  \"accountNumber\": \"1000000001\",\n  \"amount\": 5000.00,\n  \"senderAccountNumber\": \"0123456789\",\n  \"senderName\": \"John Doe\",\n  \"narration\": \"Transfer from John Doe\",\n  \"transactionReference\": \"TXN-INFLOW-20260630-001\",\n  \"transactionDate\": \"2026-06-30T14:30:00Z\",\n  \"sessionId\": \"SESSION-ABC123456\",\n  \"responseCode\": \"00\",\n  \"responseMessage\": \"Successful\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/fintech/webhooks/notification",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "fintech",
+                                "webhooks",
+                                "notification"
+                            ]
+                        },
+                        "description": "Canonical webhook URL to share with the wallet provider. Auto-detects inflow, upgrade-status, or raw events. Expected response: `{\"success\": true, \"status\": \"success\", \"code\": \"00\", \"message\": \"Acknowledged\"}`"
+                    },
+                    "response": [
+                        {
+                            "name": "Success - Acknowledged",
+                            "originalRequest": {
+                                "method": "POST",
+                                "header": [
+                                    {
+                                        "key": "Content-Type",
+                                        "value": "application/json"
+                                    }
+                                ],
+                                "body": {
+                                    "mode": "raw",
+                                    "raw": "{\n  \"accountNumber\": \"1000000001\",\n  \"amount\": 5000.00,\n  \"transactionReference\": \"TXN-INFLOW-20260630-001\",\n  \"transactionDate\": \"2026-06-30T14:30:00Z\"\n}"
+                                },
+                                "url": {
+                                    "raw": "{{base_url}}/fintech/webhooks/notification",
+                                    "host": [
+                                        "{{base_url}}"
+                                    ],
+                                    "path": [
+                                        "fintech",
+                                        "webhooks",
+                                        "notification"
+                                    ]
+                                }
+                            },
+                            "status": "OK",
+                            "code": 200,
+                            "_postman_previewlanguage": "json",
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"success\": true,\n  \"status\": \"success\",\n  \"code\": \"00\",\n  \"message\": \"Acknowledged\"\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "9b. Inflow Notification",
+                    "request": {
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{webhook_username}}",
+                                    "type": "string"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{webhook_password}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"accountNumber\": \"1000000001\",\n  \"amount\": 5000.00,\n  \"senderAccountNumber\": \"0123456789\",\n  \"senderName\": \"John Doe\",\n  \"narration\": \"Transfer from John Doe\",\n  \"transactionReference\": \"TXN-INFLOW-20260630-001\",\n  \"transactionDate\": \"2026-06-30T14:30:00Z\",\n  \"sessionId\": \"SESSION-ABC123456\",\n  \"responseCode\": \"00\",\n  \"responseMessage\": \"Successful\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/fintech/webhooks/inflow",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "fintech",
+                                "webhooks",
+                                "inflow"
+                            ]
+                        },
+                        "description": "Dedicated inflow webhook endpoint. Same Basic Auth and acknowledgement response as the canonical notification URL."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "9c. Upgrade Status Notification",
+                    "request": {
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{webhook_username}}",
+                                    "type": "string"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{webhook_password}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"accountNumber\": \"1000000001\",\n  \"upgradeStatus\": \"Approved\",\n  \"tier\": 2,\n  \"reason\": \"All documents verified\",\n  \"approvalDate\": \"2026-06-30T15:00:00Z\",\n  \"responseCode\": \"00\",\n  \"responseMessage\": \"Upgrade approved\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/fintech/webhooks/upgrade-status",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "fintech",
+                                "webhooks",
+                                "upgrade-status"
+                            ]
+                        },
+                        "description": "Webhook for wallet tier upgrade approvals or declines. `upgradeStatus` values: Approved, Declined, Pending."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "9d. 9PSB Webhook (legacy alias)",
+                    "request": {
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{webhook_username}}",
+                                    "type": "string"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{webhook_password}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"eventType\": \"inflow\",\n  \"accountNumber\": \"1000000001\",\n  \"amount\": 2500.00,\n  \"transactionReference\": \"9PSB-TXN-001\",\n  \"transactionDate\": \"2026-06-30T14:30:00Z\",\n  \"senderName\": \"Jane Doe\",\n  \"narration\": \"9PSB credit notification\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/fintech/webhooks/9psb",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "fintech",
+                                "webhooks",
+                                "9psb"
+                            ]
+                        },
+                        "description": "Legacy alias that uses the same auth and acknowledgement contract as `/notification`."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "9e. Webhook - No Auth (expect 401)",
+                    "request": {
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"accountNumber\": \"1000000001\",\n  \"amount\": 5000.00,\n  \"transactionReference\": \"TXN-UNAUTH-TEST\",\n  \"transactionDate\": \"2026-06-30T14:30:00Z\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/fintech/webhooks/notification",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "fintech",
+                                "webhooks",
+                                "notification"
+                            ]
+                        },
+                        "description": "Negative test: request without Basic Auth should return HTTP 401 Unauthorized."
+                    },
+                    "response": []
+                }
+            ]
         }
     ],
     "variable": [
         {
             "key": "base_url",
             "value": "http://localhost:8000",
+            "type": "string"
+        },
+        {
+            "key": "webhook_username",
+            "value": "sendinchat_webhook",
+            "type": "string"
+        },
+        {
+            "key": "webhook_password",
+            "value": "",
             "type": "string"
         }
     ]

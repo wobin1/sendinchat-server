@@ -1,3 +1,5 @@
+from pathlib import Path
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError, HTTPException
@@ -5,9 +7,15 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 
+# Allow running from either the project root (`uvicorn app.main:app`) or from
+# inside the `app/` directory (`uvicorn main:app`).
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from app.db.database import init_db, close_pool
 from app.users.routers import router as users_router
 from app.packages.fintech.routers import router as fintech_router
+from app.packages.fintech.psb_webhook import router as psb_webhook_router
 from app.packages.chat.routers import router as chat_router
 from app.core.exceptions import (
     APIException,
@@ -75,8 +83,7 @@ app.add_middleware(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """Handle HTTPException to return flat JSON without detail wrapper."""
-    # If detail is already a dict with our structure, return it directly
-    if isinstance(exc.detail, dict) and "status" in exc.detail:
+    if isinstance(exc.detail, dict) and ("status" in exc.detail or "success" in exc.detail):
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.detail
@@ -97,6 +104,7 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 # Include routers
 app.include_router(users_router)
 app.include_router(fintech_router)
+app.include_router(psb_webhook_router)
 app.include_router(chat_router)
 
 
