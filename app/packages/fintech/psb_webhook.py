@@ -1,12 +1,19 @@
 from datetime import datetime
 import json
-from typing import Any, Dict, Optional
-
 import logging
+from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import ValidationError
 
+from app.packages.fintech import service as fintech_service
+from app.packages.fintech.schemas import (
+    InflowWebhookPayload,
+    ProviderWebhookAckResponse,
+    UpgradeStatusWebhookPayload,
+)
 from app.packages.fintech.service import JsonDatabase
+from app.packages.fintech.webhook_auth import verify_webhook_basic_auth, webhook_ack_response
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +21,7 @@ router = APIRouter(prefix="/fintech/webhooks", tags=["fintech-webhooks"])
 
 
 def _classify_event(payload: Dict[str, Any]) -> str:
-    """Best-effort classification for a 9PSB callback payload."""
+    """Best-effort classification for a wallet-provider callback payload."""
     for key in ("eventType", "notificationType", "transactionType", "type", "event", "status"):
         value = payload.get(key)
         if value is None:
@@ -37,8 +44,8 @@ def _record_webhook(payload: Dict[str, Any], event_type: str) -> Dict[str, Any]:
     record = {
         "id": payload.get("transactionReference")
         or payload.get("reference")
-        or f"9psb-webhook-{datetime.utcnow().timestamp()}",
-        "source": "9PSB",
+        or f"wallet-webhook-{datetime.utcnow().timestamp()}",
+        "source": "wallet-provider",
         "eventType": event_type,
         "payload": payload,
         "receivedAt": datetime.utcnow().isoformat() + "Z",
@@ -67,12 +74,12 @@ async def _extract_payload(request: Request) -> Dict[str, Any]:
         except json.JSONDecodeError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"status": "error", "message": "Webhook body must be valid JSON", "data": None},
+                detail={"success": False, "status": "error", "code": "01", "message": "Webhook body must be valid JSON"},
             )
         if not isinstance(parsed, dict):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"status": "error", "message": "Webhook payload must be a JSON object", "data": None},
+                detail={"success": False, "status": "error", "code": "01", "message": "Webhook payload must be a JSON object"},
             )
         return parsed
 
@@ -92,49 +99,111 @@ async def _extract_payload(request: Request) -> Dict[str, Any]:
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": "Webhook body must be valid JSON", "data": None},
+            detail={"success": False, "status": "error", "code": "01", "message": "Webhook body must be valid JSON"},
         )
     if not isinstance(parsed, dict):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": "Webhook payload must be a JSON object", "data": None},
+            detail={"success": False, "status": "error", "code": "01", "message": "Webhook payload must be a JSON object"},
         )
     return parsed
 
 
-@router.post("/9psb")
-async def nine_psb_webhook(request: Request):
-    """
-    Store an incoming 9PSB webhook payload without changing any existing webhook behavior.
+def _process_webhook_payload(payload: Dict[str, Any], event_type: str) -> None:
+    """Route a classified webhook payload to the appropriate handler."""
+    if event_type == "inflow":
+        validated = InflowWebhookPayload(**payload)
+        fintech_service.handle_inflow_notification(validated.model_dump())
+        return
 
-    This endpoint saves the raw JSON body to the local JSON database and tags it as
-    `inflow`, `upgrade-status`, or `raw` when it can infer the event type.
+    if event_type == "upgrade-status":
+        validated = UpgradeStatusWebhookPayload(**payload)
+        fintech_service.handle_upgrade_status_notification(validated.model_dump())
+        return
+
+    _record_webhook(payload, event_type)
+
+
+@router.post(
+    "/notification",
+    response_model=ProviderWebhookAckResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Wallet provider webhook (canonical URL)",
+)
+async def wallet_notification_webhook(
+    request: Request,
+    _: str = Depends(verify_webhook_basic_auth),
+):
+    """
+    Canonical webhook endpoint for third-party wallet notifications.
+
+    Requires HTTP Basic Authentication. Returns the provider-required
+    acknowledgement format on success.
     """
     try:
         payload = await _extract_payload(request)
-
         event_type = _classify_event(payload)
-        record = _record_webhook(payload, event_type)
-        logger.info("Stored 9PSB webhook event type=%s id=%s", event_type, record["id"])
+        _process_webhook_payload(payload, event_type)
+        logger.info("Processed wallet webhook event type=%s", event_type)
+        return webhook_ack_response()
+    except ValidationError as e:
+        first_error = e.errors()[0] if e.errors() else {}
+        field = ".".join(str(part) for part in first_error.get("loc", []))
+        message = f"Validation failed: {field} - {first_error.get('msg', 'invalid value')}"
+        logger.error("Wallet webhook validation failed: %s", message)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "status": "error", "code": "01", "message": message},
+        )
+    except ValueError as e:
+        logger.error("Wallet webhook processing failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "status": "error", "code": "01", "message": str(e)},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Wallet webhook error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "status": "error", "code": "99", "message": "Webhook processing failed"},
+        )
 
-        return {
-            "status": "received",
-            "message": "9PSB webhook stored successfully",
-            "data": {
-                "id": record["id"],
-                "source": "9PSB",
-                "eventType": event_type,
-                "payload": payload,
-                "receivedAt": record["receivedAt"],
-                "transactionReference": payload.get("transactionReference"),
-                "accountNumber": payload.get("accountNumber"),
-            },
-        }
+
+@router.post(
+    "/9psb",
+    response_model=ProviderWebhookAckResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Legacy 9PSB webhook alias",
+)
+async def nine_psb_webhook(
+    request: Request,
+    _: str = Depends(verify_webhook_basic_auth),
+):
+    """
+    Legacy alias that stores and processes 9PSB callbacks using the same
+    authentication and acknowledgement contract as /notification.
+    """
+    try:
+        payload = await _extract_payload(request)
+        event_type = _classify_event(payload)
+        _process_webhook_payload(payload, event_type)
+        logger.info("Processed 9PSB webhook event type=%s", event_type)
+        return webhook_ack_response()
+    except ValidationError as e:
+        first_error = e.errors()[0] if e.errors() else {}
+        field = ".".join(str(part) for part in first_error.get("loc", []))
+        message = f"Validation failed: {field} - {first_error.get('msg', 'invalid value')}"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "status": "error", "code": "01", "message": message},
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to store 9PSB webhook: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Failed to store 9PSB webhook", "data": None},
+            detail={"success": False, "status": "error", "code": "99", "message": "Failed to store 9PSB webhook"},
         )

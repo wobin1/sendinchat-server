@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     WALLET_API_TIMEOUT: int = 30
     WALLET_MERCHANT_SHORT_CODE: str = ""
 
+    # Incoming wallet-provider webhook Basic Auth (share with third-party provider)
+    WEBHOOK_USERNAME: str = ""
+    WEBHOOK_PASSWORD: str = ""
+
     @model_validator(mode="after")
     def default_wallet_auth_url(self) -> "Settings":
         if not self.WALLET_AUTH_API_BASE_URL.strip():

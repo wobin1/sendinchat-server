@@ -13,7 +13,8 @@ from app.packages.fintech.schemas import (
     WalletUpgradeRequest, WalletUpgradeResponse, WalletUpgradePrefillResponse,
     StandardWalletUpgradePrefillResponse,
     UpgradeStatusResponse, GetWalletByBVNResponse,
-    InflowWebhookPayload, UpgradeStatusWebhookPayload, WebhookResponse,
+    InflowWebhookPayload, UpgradeStatusWebhookPayload,
+    ProviderWebhookAckResponse,
     BankListResponse, BankInfo,
     ClientAuthRequest, ClientAuthResponse,
     StandardWalletResponse, StandardBankTransferResponse,
@@ -21,10 +22,10 @@ from app.packages.fintech.schemas import (
     StandardWalletTransactionsResponse, StandardBankListResponse,
     StandardClientAuthResponse, StandardWalletUpgradeResponse,
     StandardUpgradeStatusResponse, StandardGetWalletByBVNResponse,
-    StandardWebhookResponse,
     OtherBankEnquiryRequest, ExternalTransferRequest, TransactionItem
 )
 from app.packages.fintech import service as fintech_service
+from app.packages.fintech.webhook_auth import verify_webhook_basic_auth, webhook_ack_response
 from app.users.routers import get_current_user
 from app.users import service as user_service
 from app.users.models import User
@@ -806,8 +807,11 @@ async def get_wallet_by_bvn(bvn: str):
 # ============= Webhooks =============
 
 # ============= 12. Inflow Notification Webhook =============
-@router.post("/webhooks/inflow", response_model=StandardWebhookResponse, status_code=status.HTTP_200_OK)
-async def inflow_webhook(payload: InflowWebhookPayload):
+@router.post("/webhooks/inflow", response_model=ProviderWebhookAckResponse, status_code=status.HTTP_200_OK)
+async def inflow_webhook(
+    payload: InflowWebhookPayload,
+    _: str = Depends(verify_webhook_basic_auth),
+):
     """
     Webhook endpoint for inflow notifications from third-party API.
     
@@ -815,29 +819,28 @@ async def inflow_webhook(payload: InflowWebhookPayload):
     The third-party API calls this endpoint to notify about incoming transfers.
     """
     try:
-        result = fintech_service.handle_inflow_notification(payload.dict())
-        return {
-            "status": "success",
-            "message": "Webhook processed successfully",
-            "data": WebhookResponse(**result)
-        }
+        fintech_service.handle_inflow_notification(payload.model_dump())
+        return webhook_ack_response()
     except ValueError as e:
         logger.error(f"Inflow webhook processing failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e), "data": None}
+            detail={"success": False, "status": "error", "code": "01", "message": str(e)},
         )
     except Exception as e:
         logger.error(f"Inflow webhook error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Webhook processing failed", "data": None}
+            detail={"success": False, "status": "error", "code": "99", "message": "Webhook processing failed"},
         )
 
 
 # ============= 13. Upgrade Status Notification Webhook =============
-@router.post("/webhooks/upgrade-status", response_model=StandardWebhookResponse, status_code=status.HTTP_200_OK)
-async def upgrade_status_webhook(payload: UpgradeStatusWebhookPayload):
+@router.post("/webhooks/upgrade-status", response_model=ProviderWebhookAckResponse, status_code=status.HTTP_200_OK)
+async def upgrade_status_webhook(
+    payload: UpgradeStatusWebhookPayload,
+    _: str = Depends(verify_webhook_basic_auth),
+):
     """
     Webhook endpoint for upgrade status notifications from third-party API.
     
@@ -845,23 +848,19 @@ async def upgrade_status_webhook(payload: UpgradeStatusWebhookPayload):
     The third-party API calls this endpoint to notify about upgrade status changes.
     """
     try:
-        result = fintech_service.handle_upgrade_status_notification(payload.dict())
-        return {
-            "status": "success",
-            "message": "Webhook processed successfully",
-            "data": WebhookResponse(**result)
-        }
+        fintech_service.handle_upgrade_status_notification(payload.model_dump())
+        return webhook_ack_response()
     except ValueError as e:
         logger.error(f"Upgrade status webhook processing failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"status": "error", "message": str(e), "data": None}
+            detail={"success": False, "status": "error", "code": "01", "message": str(e)},
         )
     except Exception as e:
         logger.error(f"Upgrade status webhook error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"status": "error", "message": "Webhook processing failed", "data": None}
+            detail={"success": False, "status": "error", "code": "99", "message": "Webhook processing failed"},
         )
 
 

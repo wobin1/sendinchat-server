@@ -351,6 +351,14 @@ class WebhookResponse(BaseModel):
     message: str = "Webhook processed successfully"
 
 
+class ProviderWebhookAckResponse(BaseModel):
+    """Acknowledgement response required by third-party wallet webhook providers."""
+    success: bool = True
+    status: str = "success"
+    code: str = "00"
+    message: str = "Acknowledged"
+
+
 # ============= Client Authentication =============
 class ClientAuthRequest(BaseModel):
     """Schema for client authentication request."""

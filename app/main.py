@@ -83,8 +83,7 @@ app.add_middleware(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """Handle HTTPException to return flat JSON without detail wrapper."""
-    # If detail is already a dict with our structure, return it directly
-    if isinstance(exc.detail, dict) and "status" in exc.detail:
+    if isinstance(exc.detail, dict) and ("status" in exc.detail or "success" in exc.detail):
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.detail

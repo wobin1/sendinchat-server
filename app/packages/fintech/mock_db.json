@@ -242,6 +242,56 @@
       "payload": {},
       "receivedAt": "2026-06-24T15:10:08.444427Z",
       "processed": false
+    },
+    {
+      "id": "wallet-webhook-1782779919.992331",
+      "source": "wallet-provider",
+      "eventType": "raw",
+      "payload": {},
+      "receivedAt": "2026-06-30T01:38:39.992349Z",
+      "processed": false
+    },
+    {
+      "id": "wallet-webhook-1782779923.465603",
+      "source": "wallet-provider",
+      "eventType": "raw",
+      "payload": {},
+      "receivedAt": "2026-06-30T01:38:43.465619Z",
+      "processed": false
+    }
+  ],
+  "inflowNotifications": [
+    {
+      "id": "TXN-INFLOW-20260630-001",
+      "type": "inflow",
+      "accountNumber": "1000000001",
+      "amount": 5000.0,
+      "senderAccountNumber": "0123456789",
+      "senderName": "John Doe",
+      "narration": "Transfer from John Doe",
+      "transactionReference": "TXN-INFLOW-20260630-001",
+      "transactionDate": "2026-06-30T14:30:00Z",
+      "sessionId": "SESSION-ABC123456",
+      "responseCode": "00",
+      "responseMessage": "Successful",
+      "receivedAt": "2026-06-30T01:12:22.166774Z",
+      "processed": true
+    },
+    {
+      "id": "TXN-INFLOW-20260630-001",
+      "type": "inflow",
+      "accountNumber": "1000000001",
+      "amount": 5000.0,
+      "senderAccountNumber": "0123456789",
+      "senderName": "John Doe",
+      "narration": "Transfer from John Doe",
+      "transactionReference": "TXN-INFLOW-20260630-001",
+      "transactionDate": "2026-06-30T14:30:00Z",
+      "sessionId": "SESSION-ABC123456",
+      "responseCode": "00",
+      "responseMessage": "Successful",
+      "receivedAt": "2026-06-30T01:38:29.579166Z",
+      "processed": true
     }
   ]
 }
